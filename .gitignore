@@ -1,0 +1,31 @@
+# Secretos y API keys
+api_key.txt
+*.env
+.env*
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Datos generados en runtime
+partidos.json
+debug_players.json
+betano_text.txt
+
+# Editores / IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
