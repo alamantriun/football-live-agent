@@ -11,7 +11,7 @@
 
 **Sistema multi-agente que extrae datos de partidos de fútbol en vivo, calcula métricas propias (riesgo de gol, momentum) y predice resultados finales con simulación Monte Carlo.**
 
-[Características](#-características) · [Arquitectura](#-arquitectura) · [Instalación](#-instalación) · [Uso](#-uso) · [Stack Técnico](#-stack-técnico)
+[Características](#-características) · [Capturas](#-capturas-de-pantalla) · [Arquitectura](#-arquitectura) · [Instalación](#-instalación) · [Uso](#-uso) · [Stack Técnico](#-stack-técnico)
 
 </div>
 
@@ -27,6 +27,24 @@
 - 🔮 **Predictor pre-partido** — H2H scraping + Poisson + Monte Carlo (5,000 simulaciones) para partidos futuros
 - ⚡ **Arquitectura async** — Pipeline producer/consumer con `asyncio.Queue`, cero bloqueos
 - 🖥️ **Selector visual de partidos** — Interfaz `curses` con navegación por flechas y categorías (En Vivo, Hoy, Próximos)
+
+## 📸 Capturas de Pantalla
+
+### 🖥️ Selector Visual de Partidos (Terminal)
+![Selector de Partidos Terminal](docs/screenshots/terminal_selector.jpg)
+
+### 🌐 Dashboard Web en Tiempo Real
+#### Métricas Principales & Simulación Monte Carlo
+![Dashboard Monte Carlo](docs/screenshots/dashboard_montecarlo.jpg)
+
+#### Gráficas en Vivo (Riesgo de Gol, Posesión y Momentum)
+![Gráficas en Vivo](docs/screenshots/dashboard_live_charts.jpg)
+
+#### Cronología Reciente del Partido
+![Cronología del Partido](docs/screenshots/dashboard_timeline.jpg)
+
+#### Distribuciones & Probabilidades Monte Carlo
+![Distribuciones Monte Carlo](docs/screenshots/dashboard_distributions.jpg)
 
 ## 🏗️ Arquitectura
 
