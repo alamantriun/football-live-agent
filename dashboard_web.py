@@ -158,6 +158,7 @@ def empaquetar_estado(
         "prediccion": prediccion or {},
         "historial_mc": historial_mc or [],
         "series": construir_serie_temporal(buffer),
+        "cronologia": ultimo.get("_cronologia", []),
         "jugadores": ultimo.get("_jugadores", [])[:5],
         "timestamp": ultimo.get("timestamp", ""),
         "servidor": meta.get("servidor", {}),
@@ -359,6 +360,14 @@ HTML_DASHBOARD = """<!DOCTYPE html>
   .heatmap-table .current {
     outline: 2px solid #f0c040; outline-offset: -2px;
   }
+  .timeline { padding: 0 24px 24px; display: grid; gap: 8px; }
+  .tl-item { 
+    background: #161b22; border: 1px solid #30363d; 
+    padding: 10px 14px; border-radius: 8px; font-size: 0.85rem;
+    display: flex; gap: 12px; align-items: center;
+  }
+  .tl-min { font-weight: bold; color: #8b949e; width: 40px; }
+  .tl-icon { font-size: 1.2rem; }
   .mc-scatter { max-height: 280px !important; }
   .sync-bar {
     background: #1c2128; border-bottom: 1px solid #30363d;
@@ -403,6 +412,13 @@ HTML_DASHBOARD = """<!DOCTYPE html>
       <h2>Evolución probabilidades 1X2</h2>
       <canvas id="chartMcEvol"></canvas>
     </div>
+  </div>
+</section>
+
+<section class="mc-section">
+  <h2>⏱️ Cronología Reciente del Partido</h2>
+  <div class="timeline" id="cronologia">
+    <div class="waiting">Esperando eventos...</div>
   </div>
 </section>
 
@@ -666,6 +682,29 @@ function renderTips(d) {
   document.getElementById('tips').innerHTML = items.map(i => `<div class="tip${i.a?' alert':''}">${i.t}</div>`).join('');
 }
 
+function renderCronologia(d) {
+  const cron = d.cronologia || [];
+  if (!cron.length) {
+    document.getElementById('cronologia').innerHTML = '<div class="waiting">Sin eventos registrados aún...</div>';
+    return;
+  }
+  // Tomar los últimos 10 y revertir para mostrar el más nuevo arriba
+  const recientes = cron.slice(-8).reverse();
+  const html = recientes.map(c => {
+    let icon = '•';
+    if (c.tipo === 'gol') icon = '⚽';
+    else if (c.tipo === 'amarilla') icon = '🟨';
+    else if (c.tipo === 'roja') icon = '🟥';
+    else if (c.tipo === 'sustitucion') icon = '↔';
+    
+    let txt = c.texto || '';
+    if (c.tipo === 'gol') txt = `<strong style="color:#f0c040">GOL</strong> — ${c.jugador} <span style="color:#8b949e">(${c.equipo.toUpperCase()})</span>`;
+    
+    return `<div class="tl-item"><div class="tl-min">${c.minuto}'</div><div class="tl-icon">${icon}</div><div>${txt}</div></div>`;
+  }).join('');
+  document.getElementById('cronologia').innerHTML = html;
+}
+
 function renderSyncBar(d) {
   const bar = document.getElementById('syncBar');
   if (!bar) return;
@@ -701,6 +740,7 @@ function updateDashboard(d) {
   renderMcMeta(d);
   renderMcScatter(d);
   renderMcEvol(d);
+  renderCronologia(d);
 
   const s = d.series || {};
   const mins = s.minutos?.map(m => Math.round(m)) || [];

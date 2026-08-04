@@ -10,6 +10,7 @@ No toca archivos ni red. Todo en memoria.
 
 import asyncio
 import logging
+import math
 
 import pandas as pd
 
@@ -75,9 +76,12 @@ def calcular_riesgo_gol_dinamico(df_buffer: pd.DataFrame, es_local: bool) -> flo
 
     componente = (tasa_tiros * 0.40) + (tasa_ataques * 0.60)
     
-    # Un equipo muy agresivo podría lograr 0.20 acciones por minuto
-    MAX_RATE_ESPERADO_LOCAL = 0.20 
-    return min(100.0, max(0.0, (componente / MAX_RATE_ESPERADO_LOCAL) * 100))
+    # Un equipo muy agresivo podría lograr 0.25 acciones por minuto
+    MAX_RATE_ESPERADO = 0.25
+    ratio = componente / MAX_RATE_ESPERADO
+    # Curva asintótica: se acerca a 100 pero nunca lo toca bruscamente
+    riesgo = 100.0 * (1.0 - math.exp(-ratio * 1.5))
+    return max(0.0, riesgo)
 
 
 def calcular_animo_dinamico(df_buffer: pd.DataFrame) -> tuple[float, float]:
