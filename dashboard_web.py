@@ -46,7 +46,7 @@ def _calcular_deltas(valores: list) -> list:
     """Convierte totales acumulados en incrementos entre eventos consecutivos."""
     if not valores:
         return []
-    deltas = [max(0, valores[0])]
+    deltas = [0]  # El primer valor no tiene incremento previo
     for i in range(1, len(valores)):
         deltas.append(max(0, valores[i] - valores[i - 1]))
     return deltas
@@ -94,6 +94,10 @@ def construir_serie_temporal(buffer: list) -> dict:
         at_l.append(ataques.get("local", 0) if isinstance(ataques, dict) else 0)
         at_v.append(ataques.get("visitante", 0) if isinstance(ataques, dict) else 0)
 
+    # Calcular deltas ANTES de inyectar el cero artificial inicial
+    deltas_at_l = _calcular_deltas(at_l)
+    deltas_at_v = _calcular_deltas(at_v)
+
     # Insertar punto base en minuto 0 para que las gráficas arranquen desde 0
     if minutos and minutos[0] > 0:
         minutos.insert(0, 0)
@@ -105,8 +109,8 @@ def construir_serie_temporal(buffer: list) -> dict:
         p_v.insert(0, None)
         t_l.insert(0, 0)
         t_v.insert(0, 0)
-        at_l.insert(0, 0)
-        at_v.insert(0, 0)
+        deltas_at_l.insert(0, 0)
+        deltas_at_v.insert(0, 0)
 
     return {
         "minutos": minutos,
@@ -118,8 +122,8 @@ def construir_serie_temporal(buffer: list) -> dict:
         "posesion_visitante": p_v,
         "tiros_local": t_l,
         "tiros_visitante": t_v,
-        "ataques_local": _calcular_deltas(at_l),
-        "ataques_visitante": _calcular_deltas(at_v),
+        "ataques_local": deltas_at_l,
+        "ataques_visitante": deltas_at_v,
     }
 
 
