@@ -57,7 +57,7 @@ SESSION_ID: str = uuid.uuid4().hex[:8]
 
 console = Console()
 
-DASHBOARD_REFRESH = 3.0  # segundos entre actualizaciones del dashboard
+DASHBOARD_REFRESH = 1.5  # segundos entre actualizaciones del dashboard
 PARTIDOS_FILE = "partidos.json"
 WEB_PORT = int(os.getenv("WEB_PORT", "8765"))
 
@@ -442,10 +442,12 @@ def generar_dashboard() -> Layout:
             barras = []
             for g in range(0, 7):
                 cnt = hist.get(str(g), 0)
+                porcentaje = (cnt / sum(hist.values())) * 100 if sum(hist.values()) > 0 else 0
                 bloques = int(cnt / max_val * 8) if max_val else 0
-                barras.append(f"{g}:{('█' * bloques).ljust(8)}")
-            top_table.add_row("", "", "  ".join(barras[:4]))
-            top_table.add_row("", "", "  ".join(barras[4:7]))
+                barra = ("█" * bloques).ljust(8, "░")
+                barras.append(f"{g} {barra} {porcentaje:4.1f}%")
+            top_table.add_row("", "", "  ".join(barras[:3]))
+            top_table.add_row("", "", "  ".join(barras[3:6]))
     else:
         top_table.add_row("[dim]Esperando simulación...[/dim]", "", "")
 

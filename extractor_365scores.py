@@ -22,7 +22,7 @@ logging.basicConfig(format="[%(asctime)s] [%(name)s] %(message)s")
 logger = logging.getLogger("extractor_365scores")
 logger.setLevel(logging.INFO)
 
-POLL_INTERVAL = 20.0
+POLL_INTERVAL = 3.0
 API_BASE = "https://webws.365scores.com/web"
 SCORES_HOME = "https://www.365scores.com/es"
 

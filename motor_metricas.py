@@ -19,8 +19,8 @@ logger.setLevel(logging.DEBUG)
 
 # ─────────────────────────── CONSTANTES ───────────────────────────
 VENTANA_EVENTOS = 180        # máximo de filas en el DataFrame (≈3 min a 1 evt/s)
-POLL_INTERVAL_REF = 7.0     # intervalo del extractor API (segundos)
-MAX_RATE_ESPERADO = 0.25     # calibración de presión constante por minuto
+POLL_INTERVAL_REF = 3.0     # intervalo del extractor API (segundos)
+MAX_RATE_ESPERADO = 0.20     # calibración de presión constante por minuto (más sensible)
 PROB_CONV_ATAQUE = 0.75      # umbral para bonus de ánimo
 BONUS_ANIMO = 1.20           # multiplicador al superar el umbral
 
@@ -75,9 +75,9 @@ def calcular_riesgo_gol_dinamico(df_buffer: pd.DataFrame, es_local: bool) -> flo
 
     componente = (tasa_tiros * 0.40) + (tasa_ataques * 0.60)
     
-    # Un equipo muy agresivo podría lograr 0.3 a 0.5 acciones por minuto
-    MAX_RATE_ESPERADO = 0.35 
-    return min(100.0, max(0.0, (componente / MAX_RATE_ESPERADO) * 100))
+    # Un equipo muy agresivo podría lograr 0.20 acciones por minuto
+    MAX_RATE_ESPERADO_LOCAL = 0.20 
+    return min(100.0, max(0.0, (componente / MAX_RATE_ESPERADO_LOCAL) * 100))
 
 
 def calcular_animo_dinamico(df_buffer: pd.DataFrame) -> tuple[float, float]:
@@ -95,7 +95,16 @@ def calcular_animo_dinamico(df_buffer: pd.DataFrame) -> tuple[float, float]:
     acc_total = delta_loc + delta_vis
 
     if acc_total == 0:
-        ratio = 0.5
+        # Fallback a posesión si no hay ataques recientes para que la gráfica no sea plana
+        if not df_buffer.empty and "posesion_local" in df_buffer.columns:
+            pos_l = df_buffer["posesion_local"].iloc[-1]
+            pos_v = df_buffer["posesion_visitante"].iloc[-1]
+            if pd.notna(pos_l) and pd.notna(pos_v) and (pos_l + pos_v) > 0:
+                ratio = pos_l / (pos_l + pos_v)
+            else:
+                ratio = 0.5
+        else:
+            ratio = 0.5
     else:
         ratio = delta_loc / acc_total
 
