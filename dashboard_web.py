@@ -237,25 +237,31 @@ HTML_DASHBOARD = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>⚽ Dashboard en Vivo — FIFA Agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
-    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
     background: #0d1117; color: #e6edf3;
     min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
   }
   header {
-    background: linear-gradient(135deg, #161b22 0%, #1a2332 100%);
+    background: linear-gradient(135deg, #0d1117 0%, #161b22 40%, #1a2332 100%);
     border-bottom: 1px solid #30363d;
-    padding: 16px 24px;
+    padding: 20px 24px;
     display: flex; justify-content: space-between; align-items: center;
     flex-wrap: wrap; gap: 12px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.3);
+    position: sticky; top: 0; z-index: 10;
   }
   header h1 { font-size: 1.3rem; color: #58a6ff; }
   .score {
-    font-size: 2rem; font-weight: 800; color: #f0c040;
-    letter-spacing: 2px;
+    font-size: 2.4rem; font-weight: 800; color: #f0c040;
+    letter-spacing: 3px;
+    text-shadow: 0 0 20px rgba(240,192,64,0.3);
   }
   .badge {
     background: #238636; color: #fff;
@@ -272,7 +278,13 @@ HTML_DASHBOARD = """<!DOCTYPE html>
   }
   .card {
     background: #161b22; border: 1px solid #30363d;
-    border-radius: 10px; padding: 16px;
+    border-radius: 12px; padding: 16px;
+    transition: transform 0.2s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+  }
+  .card:hover {
+    transform: translateY(-2px);
+    border-color: #58a6ff44;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
   }
   .card h2 {
     font-size: 0.85rem; color: #8b949e;
@@ -286,19 +298,25 @@ HTML_DASHBOARD = """<!DOCTYPE html>
   }
   .kpi {
     background: #161b22; border: 1px solid #30363d;
-    border-radius: 8px; padding: 12px; text-align: center;
+    border-radius: 10px; padding: 14px 12px; text-align: center;
+    transition: transform 0.2s ease, box-shadow 0.3s ease;
   }
-  .kpi .val { font-size: 1.6rem; font-weight: 700; }
-  .kpi .lbl { font-size: 0.7rem; color: #8b949e; margin-top: 4px; }
+  .kpi:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,0.2); }
+  .kpi .val { font-size: 1.6rem; font-weight: 700; transition: text-shadow 0.3s ease; }
+  .kpi .lbl { font-size: 0.7rem; color: #8b949e; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
   .kpi.local .val { color: #3fb950; }
   .kpi.visit .val { color: #f85149; }
   .kpi.neutral .val { color: #58a6ff; }
+  .kpi.danger .val { color: #f85149; text-shadow: 0 0 12px rgba(248,81,73,0.5); animation: pulse 1.5s infinite; }
   .tips { padding: 0 24px 24px; }
   .tip {
     background: #1c2128; border-left: 3px solid #f0c040;
-    padding: 8px 12px; margin-bottom: 6px;
-    border-radius: 0 6px 6px 0; font-size: 0.85rem;
+    padding: 10px 14px; margin-bottom: 8px;
+    border-radius: 0 8px 8px 0; font-size: 0.85rem;
+    transition: background 0.2s ease, transform 0.15s ease;
   }
+  .tip:hover { background: #22272e; transform: translateX(4px); }
+  .tip.alert { border-left-color: #f85149; background: #2d1b1b; }
   .waiting { color: #8b949e; text-align: center; padding: 40px; }
   .mc-section {
     padding: 0 24px 16px;
@@ -410,9 +428,10 @@ const COLORS = {
 
 const chartDefaults = {
   responsive: true, maintainAspectRatio: true,
-  plugins: { legend: { labels: { color: '#8b949e', font: { size: 11 } } } },
+  animation: { duration: 400, easing: 'easeOutQuart' },
+  plugins: { legend: { labels: { color: '#8b949e', font: { size: 11, family: 'Inter' } } } },
   scales: {
-    x: { ticks: { color: '#8b949e', maxTicksLimit: 8 }, grid: { color: '#21262d' } },
+    x: { ticks: { color: '#8b949e', maxTicksLimit: 8, font: { family: 'Inter' } }, grid: { color: '#21262d' } },
     y: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' }, beginAtZero: true }
   }
 };
@@ -461,19 +480,21 @@ function detJitter(i, axis) {
 function renderKPIs(d) {
   const p = d.prediccion || {};
   const m = d.metricas || {};
+  const eq = d.equipos || {};
+  const rl = (m.riesgo_gol_local||0), rv = (m.riesgo_gol_visitante||0);
   const kpis = [
-    { lbl: 'Riesgo Local', val: (m.riesgo_gol_local||0).toFixed(1)+'%', cls: 'local' },
-    { lbl: 'Riesgo Visitante', val: (m.riesgo_gol_visitante||0).toFixed(1)+'%', cls: 'visit' },
-    { lbl: 'Ánimo Local', val: (m.animo_local||0).toFixed(1)+'%', cls: 'local' },
-    { lbl: 'Posesión Local', val: (m.posesion_local||0)+'%', cls: 'local' },
-    { lbl: 'Victoria Local', val: (p.prob_1x2_local||0).toFixed(1)+'%', cls: 'local' },
+    { lbl: `Riesgo ${eq.local||'Local'}`, val: rl.toFixed(1)+'%', cls: rl > 70 ? 'danger' : 'local' },
+    { lbl: `Riesgo ${eq.visitante||'Visit.'}`, val: rv.toFixed(1)+'%', cls: rv > 70 ? 'danger' : 'visit' },
+    { lbl: `Ánimo ${eq.local||'Local'}`, val: (m.animo_local||0).toFixed(1)+'%', cls: 'local' },
+    { lbl: `Posesión ${eq.local||'Local'}`, val: (m.posesion_local||0)+'%', cls: 'local' },
+    { lbl: `Victoria ${eq.local||'Local'}`, val: (p.prob_1x2_local||0).toFixed(1)+'%', cls: 'local' },
     { lbl: 'Empate', val: (p.prob_1x2_empate||0).toFixed(1)+'%', cls: 'neutral' },
-    { lbl: 'Victoria Visit.', val: (p.prob_1x2_visitante||0).toFixed(1)+'%', cls: 'visit' },
+    { lbl: `Victoria ${eq.visitante||'Visit.'}`, val: (p.prob_1x2_visitante||0).toFixed(1)+'%', cls: 'visit' },
     { lbl: 'Marcador Prob.', val: p.marcador_mas_probable||'—', cls: 'neutral' },
     { lbl: 'Over 2.5', val: (p.prob_over_2_5||0).toFixed(1)+'%', cls: 'neutral' },
     { lbl: 'BTTS', val: (p.prob_btts||0).toFixed(1)+'%', cls: 'neutral' },
-    { lbl: 'xG Local', val: (p.goles_esperados_local||0).toFixed(1), cls: 'local' },
-    { lbl: 'xG Visitante', val: (p.goles_esperados_visitante||0).toFixed(1), cls: 'visit' },
+    { lbl: `xG ${eq.local||'Local'}`, val: (p.goles_esperados_local||0).toFixed(2), cls: 'local' },
+    { lbl: `xG ${eq.visitante||'Visit.'}`, val: (p.goles_esperados_visitante||0).toFixed(2), cls: 'visit' },
   ];
   document.getElementById('kpis').innerHTML = kpis.map(k =>
     `<div class="kpi ${k.cls}"><div class="val">${k.val}</div><div class="lbl">${k.lbl}</div></div>`
@@ -482,10 +503,21 @@ function renderKPIs(d) {
 
 function heatColor(prob, maxProb) {
   const t = maxProb > 0 ? prob / maxProb : 0;
-  const r = Math.round(13 + t * 45);
-  const g = Math.round(17 + t * 130);
-  const b = Math.round(23 + t * 200);
-  const a = 0.25 + t * 0.75;
+  // Cold-to-hot gradient: dark → blue → green → yellow → red
+  let r, g, b;
+  if (t < 0.25) {
+    r = Math.round(13 + t * 4 * 40); g = Math.round(17 + t * 4 * 80); b = Math.round(50 + t * 4 * 150);
+  } else if (t < 0.5) {
+    const s = (t - 0.25) * 4;
+    r = Math.round(53 + s * 20); g = Math.round(97 + s * 110); b = Math.round(200 - s * 120);
+  } else if (t < 0.75) {
+    const s = (t - 0.5) * 4;
+    r = Math.round(73 + s * 150); g = Math.round(207 - s * 40); b = Math.round(80 - s * 50);
+  } else {
+    const s = (t - 0.75) * 4;
+    r = Math.round(223 + s * 32); g = Math.round(167 - s * 120); b = Math.round(30 - s * 20);
+  }
+  const a = 0.3 + t * 0.7;
   return `rgba(${r},${g},${b},${a})`;
 }
 
@@ -619,17 +651,19 @@ function renderMcEvol(d) {
 }
 
 function renderTips(d) {
-  const tips = [];
+  const items = [];
   const p = d.prediccion || {};
   const m = d.metricas || {};
-  if ((p.prob_prox_gol_local||0) > 65) tips.push('🔥 Alta probabilidad de próximo gol LOCAL');
-  if ((p.prob_prox_gol_visitante||0) > 65) tips.push('🔥 Alta probabilidad de próximo gol VISITANTE');
-  if ((p.prob_over_2_5||0) > 75) tips.push('📈 Over 2.5 goles con valor alto');
-  if ((m.riesgo_gol_local||0) > 80) tips.push('⚡ EN VIVO: Gol inminente LOCAL');
-  if ((m.riesgo_gol_visitante||0) > 80) tips.push('⚡ EN VIVO: Gol inminente VISITANTE');
-  (d.jugadores||[]).forEach(j => tips.push('👤 ' + j));
-  if (!tips.length) tips.push('Esperando más datos en vivo...');
-  document.getElementById('tips').innerHTML = tips.map(t => `<div class="tip">${t}</div>`).join('');
+  const eq = d.equipos || {};
+  if ((m.riesgo_gol_local||0) > 80) items.push({t: `⚡ EN VIVO: Gol inminente ${eq.local||'LOCAL'}`, a: true});
+  if ((m.riesgo_gol_visitante||0) > 80) items.push({t: `⚡ EN VIVO: Gol inminente ${eq.visitante||'VISITANTE'}`, a: true});
+  if ((p.prob_prox_gol_local||0) > 65) items.push({t: `🔥 Alta probabilidad de próximo gol ${eq.local||'LOCAL'}`});
+  if ((p.prob_prox_gol_visitante||0) > 65) items.push({t: `🔥 Alta probabilidad de próximo gol ${eq.visitante||'VISITANTE'}`});
+  if ((p.prob_over_2_5||0) > 75) items.push({t: '📈 Over 2.5 goles con valor alto'});
+  if ((p.prob_btts||0) > 70) items.push({t: '⚽ Ambos equipos marcarán (BTTS) con alta probabilidad'});
+  (d.jugadores||[]).forEach(j => items.push({t: '👤 ' + j}));
+  if (!items.length) items.push({t: 'Esperando más datos en vivo...'});
+  document.getElementById('tips').innerHTML = items.map(i => `<div class="tip${i.a?' alert':''}">${i.t}</div>`).join('');
 }
 
 function renderSyncBar(d) {
@@ -672,37 +706,37 @@ function updateDashboard(d) {
   const mins = s.minutos?.map(m => Math.round(m)) || [];
 
   makeChart('chartRiesgo', 'line', mins, [
-    { label: eq.local||'Local', data: s.riesgo_local, borderColor: COLORS.local, backgroundColor: COLORS.local+'33', fill: true, tension: 0.3 },
-    { label: eq.visitante||'Visitante', data: s.riesgo_visitante, borderColor: COLORS.visit, backgroundColor: COLORS.visit+'33', fill: true, tension: 0.3 },
+    { label: eq.local||'Local', data: s.riesgo_local, borderColor: COLORS.local, backgroundColor: COLORS.local+'22', fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2.5 },
+    { label: eq.visitante||'Visitante', data: s.riesgo_visitante, borderColor: COLORS.visit, backgroundColor: COLORS.visit+'22', fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2.5 },
   ], { scales: { y: { min: 0, max: 100, beginAtZero: true, title: { display: true, text: '%', color: '#8b949e' } } } });
 
   makeChart('chartPosesion', 'line', mins, [
-    { label: eq.local||'Local', data: s.posesion_local, borderColor: COLORS.local, tension: 0.3, spanGaps: true },
-    { label: eq.visitante||'Visitante', data: s.posesion_visitante, borderColor: COLORS.visit, tension: 0.3, spanGaps: true },
+    { label: eq.local||'Local', data: s.posesion_local, borderColor: COLORS.local, tension: 0.4, spanGaps: true, pointRadius: 0, borderWidth: 2.5 },
+    { label: eq.visitante||'Visitante', data: s.posesion_visitante, borderColor: COLORS.visit, tension: 0.4, spanGaps: true, pointRadius: 0, borderWidth: 2.5 },
   ], { scales: { y: { min: 0, max: 100, title: { display: true, text: '%', color: '#8b949e' } } } });
 
   makeChart('chartAnimo', 'line', mins, [
-    { label: 'Ánimo Local', data: s.animo_local, borderColor: COLORS.local, backgroundColor: COLORS.local+'44', fill: true, tension: 0.3 },
-    { label: 'Ánimo Visit.', data: s.animo_visitante, borderColor: COLORS.visit, backgroundColor: COLORS.visit+'44', fill: true, tension: 0.3 },
+    { label: 'Ánimo Local', data: s.animo_local, borderColor: COLORS.local, backgroundColor: COLORS.local+'22', fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2.5 },
+    { label: 'Ánimo Visit.', data: s.animo_visitante, borderColor: COLORS.visit, backgroundColor: COLORS.visit+'22', fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2.5 },
   ], { scales: { y: { min: 0, max: 100, beginAtZero: true, title: { display: true, text: '%', color: '#8b949e' } } } });
 
   makeChart('chartAtaques', 'bar', mins.slice(-15), [
-    { label: 'Ataques Local', data: (s.ataques_local||[]).slice(-15), backgroundColor: COLORS.local+'aa' },
-    { label: 'Ataques Visit.', data: (s.ataques_visitante||[]).slice(-15), backgroundColor: COLORS.visit+'aa' },
+    { label: 'Ataques Local', data: (s.ataques_local||[]).slice(-15), backgroundColor: COLORS.local+'aa', borderRadius: 4 },
+    { label: 'Ataques Visit.', data: (s.ataques_visitante||[]).slice(-15), backgroundColor: COLORS.visit+'aa', borderRadius: 4 },
   ]);
 
   const p = d.prediccion || {};
   makeChart('chart1x2', 'bar',
     [eq.local||'Local', 'Empate', eq.visitante||'Visitante'],
     [{ label: 'Probabilidad %', data: [p.prob_1x2_local||0, p.prob_1x2_empate||0, p.prob_1x2_visitante||0],
-       backgroundColor: [COLORS.local, COLORS.empate, COLORS.visit] }],
+       backgroundColor: [COLORS.local+'cc', COLORS.empate+'cc', COLORS.visit+'cc'], borderColor: [COLORS.local, COLORS.empate, COLORS.visit], borderWidth: 2, borderRadius: 6 }],
     { scales: { y: { max: 100 } } }
   );
 
   makeChart('chartOver', 'bar',
     ['Over 1.5', 'Over 2.5', 'Over 3.5', 'BTTS'],
     [{ label: '%', data: [p.prob_over_1_5||0, p.prob_over_2_5||0, p.prob_over_3_5||0, p.prob_btts||0],
-       backgroundColor: [COLORS.over, COLORS.over+'cc', COLORS.over+'88', COLORS.btts] }],
+       backgroundColor: [COLORS.over+'cc', COLORS.over+'aa', COLORS.over+'77', COLORS.btts+'cc'], borderColor: [COLORS.over, COLORS.over, COLORS.over, COLORS.btts], borderWidth: 2, borderRadius: 6 }],
     { scales: { y: { max: 100 } } }
   );
 
@@ -712,15 +746,15 @@ function updateDashboard(d) {
   makeChart('chartProxGol', 'doughnut',
     [eq.local||'Local', eq.visitante||'Visitante', 'Sin más goles'],
     [{ data: [proxL, proxV, sinGol],
-       backgroundColor: [COLORS.local, COLORS.visit, '#30363d'] }],
-    { plugins: { legend: { position: 'bottom' } } }
+       backgroundColor: [COLORS.local+'dd', COLORS.visit+'dd', '#30363d'], borderColor: '#0d1117', borderWidth: 3, hoverOffset: 8 }],
+    { cutout: '55%', plugins: { legend: { position: 'bottom' } } }
   );
 
   const top = p.top_marcadores || [];
   makeChart('chartMarcadores', 'bar',
     top.map(t => t.marcador),
     [{ label: 'Probabilidad %', data: top.map(t => t.prob),
-       backgroundColor: COLORS.over+'bb' }],
+       backgroundColor: COLORS.over+'88', borderColor: COLORS.over, borderWidth: 2, borderRadius: 4 }],
     { indexAxis: 'y', scales: { x: { max: 100 } } }
   );
 
@@ -729,7 +763,7 @@ function updateDashboard(d) {
   const histLabels = Object.keys(hist).sort((a,b) => +a - +b);
   makeChart('chartHist', 'bar', histLabels,
     [{ label: '% simulaciones', data: histLabels.map(k => Math.round((hist[k] / nIter) * 1000) / 10),
-       backgroundColor: COLORS.btts+'99' }],
+       backgroundColor: COLORS.btts+'88', borderColor: COLORS.btts, borderWidth: 2, borderRadius: 6 }],
     { scales: { y: { max: 100, title: { display: true, text: '% de 250 sim.', color: '#8b949e' } } } }
   );
 }
