@@ -378,51 +378,8 @@ HTML_DASHBOARD = """<!DOCTYPE html>
     padding: 8px 24px; font-size: 0.8rem; color: #8b949e;
     display: flex; flex-wrap: wrap; gap: 16px; align-items: center;
   }
-  .sync-bar.ok { border-left: 4px solid #3fb950; }
   .sync-bar.warn { border-left: 4px solid #f85149; background: #2d1b1b; color: #ffb4b4; }
   .sync-bar strong { color: #58a6ff; }
-  
-  /* CANCHA VIRTUAL (VIRTUAL PITCH) */
-  .pitch-container {
-    background: #161b22; border-radius: 12px; padding: 20px;
-    border: 1px solid #30363d; margin-bottom: 24px;
-    display: flex; flex-direction: column; align-items: center;
-  }
-  .pitch-title {
-    width: 100%; display: flex; justify-content: space-between;
-    margin-bottom: 12px; font-weight: bold; font-size: 0.9rem;
-  }
-  .pitch {
-    position: relative; width: 100%; max-width: 800px; height: 260px;
-    background: #2e7d32; border: 2px solid rgba(255,255,255,0.7);
-    overflow: hidden; border-radius: 4px; box-shadow: inset 0 0 40px rgba(0,0,0,0.5);
-  }
-  .pitch::before { /* Línea central */
-    content: ''; position: absolute; left: 50%; top: 0; bottom: 0;
-    width: 2px; background: rgba(255,255,255,0.5); transform: translateX(-50%);
-  }
-  .pitch-circle {
-    position: absolute; left: 50%; top: 50%;
-    width: 60px; height: 60px; border: 2px solid rgba(255,255,255,0.5);
-    border-radius: 50%; transform: translate(-50%, -50%);
-  }
-  .pitch-box-left, .pitch-box-right {
-    position: absolute; top: 50%; transform: translateY(-50%);
-    width: 15%; height: 50%; border: 2px solid rgba(255,255,255,0.5);
-  }
-  .pitch-box-left { left: 0; border-left: none; }
-  .pitch-box-right { right: 0; border-right: none; }
-  
-  .pitch-overlay {
-    position: absolute; top:0; left:0; right:0; bottom:0;
-    transition: background 1.5s ease-out, box-shadow 1s ease-out;
-    pointer-events: none; z-index: 10;
-  }
-  .pitch-status {
-    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    font-size: 1.5rem; font-weight: 800; color: white; text-shadow: 0 2px 10px rgba(0,0,0,0.8);
-    opacity: 0; transition: opacity 0.5s ease; z-index: 20; text-transform: uppercase;
-  }
 </style>
 </head>
 <body>
@@ -437,22 +394,6 @@ HTML_DASHBOARD = """<!DOCTYPE html>
 </header>
 
 <div class="kpis" id="kpis"></div>
-
-<!-- CANCHA VIRTUAL -->
-<section class="pitch-container">
-  <div class="pitch-title">
-    <span id="pitchLocal" style="color:#3fb950">LOCAL</span>
-    <span>RADAR EN VIVO</span>
-    <span id="pitchVisit" style="color:#f85149">VISITANTE</span>
-  </div>
-  <div class="pitch" id="pitch">
-    <div class="pitch-circle"></div>
-    <div class="pitch-box-left"></div>
-    <div class="pitch-box-right"></div>
-    <div class="pitch-overlay" id="pitchOverlay"></div>
-    <div class="pitch-status" id="pitchStatus"></div>
-  </div>
-</section>
 
 <section class="mc-section">
   <h2>🎲 Simulación Monte Carlo en Vivo</h2>
@@ -744,50 +685,6 @@ function renderTips(d) {
   document.getElementById('tips').innerHTML = items.map(i => `<div class="tip${i.a?' alert':''}">${i.t}</div>`).join('');
 }
 
-function renderVirtualPitch(d) {
-  document.getElementById('pitchLocal').innerText = d.equipos?.local || 'Local';
-  document.getElementById('pitchVisit').innerText = d.equipos?.visitante || 'Visitante';
-  
-  const rL = d.metricas?.riesgo_gol_local || 0;
-  const rV = d.metricas?.riesgo_gol_visitante || 0;
-  
-  const overlay = document.getElementById('pitchOverlay');
-  const status = document.getElementById('pitchStatus');
-  
-  // Detectar hacia dónde va la presión (Riesgo Local significa ataque hacia la derecha, etc.)
-  // Asumimos: Local ataca hacia la Derecha (right). Visitante ataca hacia la Izquierda (left).
-  if (rL > 75) {
-    overlay.style.background = 'linear-gradient(90deg, transparent 50%, rgba(248,81,73,0.6) 100%)';
-    overlay.style.boxShadow = 'inset -30px 0 50px rgba(248,81,73,0.8)';
-    status.innerText = "¡Ataque Peligroso Local!";
-    status.style.opacity = 1;
-    status.style.color = '#3fb950';
-  } else if (rV > 75) {
-    overlay.style.background = 'linear-gradient(90deg, rgba(248,81,73,0.6) 0%, transparent 50%)';
-    overlay.style.boxShadow = 'inset 30px 0 50px rgba(248,81,73,0.8)';
-    status.innerText = "¡Ataque Peligroso Visitante!";
-    status.style.opacity = 1;
-    status.style.color = '#f85149';
-  } else if (rL > 40) {
-    overlay.style.background = 'linear-gradient(90deg, transparent 60%, rgba(255,255,255,0.3) 100%)';
-    overlay.style.boxShadow = 'none';
-    status.innerText = "Presión Local";
-    status.style.opacity = 0.7;
-    status.style.color = 'white';
-  } else if (rV > 40) {
-    overlay.style.background = 'linear-gradient(90deg, rgba(255,255,255,0.3) 0%, transparent 40%)';
-    overlay.style.boxShadow = 'none';
-    status.innerText = "Presión Visitante";
-    status.style.opacity = 0.7;
-    status.style.color = 'white';
-  } else {
-    // Balón en medio campo o juego calmado
-    overlay.style.background = 'transparent';
-    overlay.style.boxShadow = 'none';
-    status.style.opacity = 0;
-  }
-}
-
 function renderCronologia(d) {
   const cron = d.cronologia || [];
   if (!cron.length) {
@@ -847,7 +744,6 @@ function updateDashboard(d) {
   renderMcScatter(d);
   renderMcEvol(d);
   renderCronologia(d);
-  renderVirtualPitch(d);
 
   const s = d.series || {};
   const mins = s.minutos?.map(m => Math.round(m)) || [];
