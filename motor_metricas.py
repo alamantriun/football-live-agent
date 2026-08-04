@@ -203,8 +203,15 @@ async def iniciar(raw_queue: asyncio.Queue, metrics_queue: asyncio.Queue) -> Non
             raw_queue.task_done()
             continue
 
-        # Agregar al buffer y calcular métricas
-        _motor.agregar_evento(evento)
+        # Verificar si estamos en receso (entretiempo, pausa)
+        estado_texto = (evento.get("_status") or "").lower()
+        es_receso = estado_texto in ("half time", "halftime", "ht", "paused") or "descanso" in estado_texto or "medio tiempo" in estado_texto
+
+        # Si no es receso, agregamos al buffer para que la ventana de tiempo avance
+        if not es_receso:
+            _motor.agregar_evento(evento)
+            
+        # Siempre calculamos las métricas (usando el buffer actual o el congelado si es receso)
         metrics_event = _motor.calcular_metricas(evento)
 
         await metrics_queue.put(metrics_event)

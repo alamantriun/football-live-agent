@@ -777,8 +777,9 @@ function updateDashboard(d) {
     { scales: { y: { max: 100 } } }
   );
 
+  const bttsLabel = (d.marcador?.local >= 1 && d.marcador?.visitante >= 1) ? 'BTTS (Cumplido)' : 'BTTS';
   makeChart('chartOver', 'bar',
-    ['Over 1.5', 'Over 2.5', 'Over 3.5', 'BTTS'],
+    ['Over 1.5', 'Over 2.5', 'Over 3.5', bttsLabel],
     [{ label: '%', data: [p.prob_over_1_5||0, p.prob_over_2_5||0, p.prob_over_3_5||0, p.prob_btts||0],
        backgroundColor: [COLORS.over+'cc', COLORS.over+'aa', COLORS.over+'77', COLORS.btts+'cc'], borderColor: [COLORS.over, COLORS.over, COLORS.over, COLORS.btts], borderWidth: 2, borderRadius: 6 }],
     { scales: { y: { max: 100 } } }

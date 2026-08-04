@@ -86,14 +86,23 @@ def _sync_web() -> None:
 
 
 def _sparkline_text(vals: list[float], width: int = 24) -> str:
-    """Mini gráfica ASCII para la terminal."""
+    """Mini gráfica ASCII para la terminal (escala relativa)."""
     if not vals:
-        return "▁" * width
-    chars = "▁▂▃▄▅▆▇█"
+        return " " * width
+    chars = " ▂▃▄▅▆▇█"
     mn, mx = min(vals), max(vals)
     rango = mx - mn if mx != mn else 1.0
     muestra = vals[-width:]
     return "".join(chars[min(7, int((v - mn) / rango * 7))] for v in muestra)
+
+
+def _sparkline_text_riesgo(vals: list[float], width: int = 24) -> str:
+    """Mini gráfica ASCII para la terminal (escala absoluta 0-100 para riesgo)."""
+    if not vals:
+        return " " * width
+    chars = " ▂▃▄▅▆▇█"
+    muestra = vals[-width:]
+    return "".join(chars[min(7, int(max(0, min(100, v)) / 100.0 * 7.99))] for v in muestra)
 
 
 def _sparkline_valores(campo: str, subcampo: str | None = None, n: int = 20) -> list[float]:
@@ -214,12 +223,12 @@ def generar_dashboard() -> Layout:
 
     spark_table.add_row(
         "[yellow]Riesgo Local[/yellow]",
-        f"[bold red]{_sparkline_text(sl_rl)}[/bold red]",
+        f"[bold red]{_sparkline_text_riesgo(sl_rl)}[/bold red]",
         f"{sl_rl[-1]:.0f}%",
     )
     spark_table.add_row(
         "[yellow]Riesgo Visit.[/yellow]",
-        f"[bold red]{_sparkline_text(sl_rv)}[/bold red]",
+        f"[bold red]{_sparkline_text_riesgo(sl_rv)}[/bold red]",
         f"{sl_rv[-1]:.0f}%",
     )
     spark_table.add_row(
@@ -323,7 +332,13 @@ def generar_dashboard() -> Layout:
         pred_table.add_row("Over 1.5", f"{prediccion_actual.get('prob_over_1_5', 0):.1f}%")
         pred_table.add_row("Over 2.5", f"{prediccion_actual.get('prob_over_2_5', 0):.1f}%")
         pred_table.add_row("Over 3.5", f"{prediccion_actual.get('prob_over_3_5', 0):.1f}%")
-        pred_table.add_row("BTTS", f"{prediccion_actual.get('prob_btts', 0):.1f}%")
+        
+        btts_val = prediccion_actual.get('prob_btts', 0)
+        if m_local >= 1 and m_visit >= 1:
+            btts_str = "[green]✅ Ya ocurrió (100%)[/green]"
+        else:
+            btts_str = f"{btts_val:.1f}%"
+        pred_table.add_row("BTTS", btts_str)
         pred_table.add_row(
             "Goles esp. L/V",
             f"{prediccion_actual.get('goles_esperados_local', 0):.1f} / "
