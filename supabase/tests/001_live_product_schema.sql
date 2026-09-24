@@ -1,4 +1,8 @@
 begin;
+
+create extension if not exists pgtap with schema extensions;
+set local search_path = public, extensions;
+
 select plan(39);
 
 select has_table('private', 'fixtures', 'fixtures exists');
