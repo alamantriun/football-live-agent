@@ -9,12 +9,15 @@ __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
+pytest-cache-files-*/
 *.egg-info/
 .eggs/
 dist/
 build/
 
 # Datos generados en runtime
+work/
+data/
 partidos.json
 debug_players.json
 betano_text.txt
@@ -29,3 +32,5 @@ betano_text.txt
 # OS
 .DS_Store
 Thumbs.db
+.playwright-cli/
+output/playwright/

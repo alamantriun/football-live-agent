@@ -2,7 +2,7 @@
 extractor_365scores.py — Extractor en vivo desde 365Scores.
 
 API interna (webws.365scores.com):
-  - /games/allscores/   → partidos del día (filtrar statusGroup 2/3 = en vivo)
+  - /games/allscores/   → partidos del día (statusGroup 3 = en vivo)
   - /game/?gameId=      → marcador, minuto, eventos, alineaciones
   - /game/stats/?games= → posesión, remates, córners…
 
@@ -14,7 +14,7 @@ import json
 import logging
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -50,6 +50,9 @@ STAT_MAP = {
     "fouls": "faltas",
     "fueras de juego": "fueras_juego",
     "offsides": "fueras_juego",
+    "expected goals": "xg",
+    "goles esperados": "xg",
+    "xg": "xg",
 }
 
 
@@ -122,8 +125,12 @@ def _hoy_365() -> str:
     return datetime.now().strftime("%d/%m/%Y")
 
 
+def _fecha_365(desplazamiento=0) -> str:
+    return (datetime.now() + timedelta(days=desplazamiento)).strftime("%d/%m/%Y")
+
+
 def _es_vivo(game: dict) -> bool:
-    return game.get("statusGroup") in (2, 3)
+    return game.get("statusGroup") == 3
 
 
 def _minuto_desde_juego(game: dict) -> float | None:
@@ -157,13 +164,20 @@ def _evento_desde_listado(game: dict) -> dict | None:
     status = game.get("statusText") or "En Vivo"
     marcador = f"{gl}-{gv}" if gl is not None and gv is not None else "—"
 
+    inicio = game.get("startTime") or ""
+    try:
+        dt_inicio = datetime.fromisoformat(inicio).astimezone()
+        fecha, hora = dt_inicio.date().isoformat(), dt_inicio.strftime("%H:%M")
+    except (ValueError, TypeError):
+        fecha, hora = "", ""
     return {
         "id": game.get("id"),
         "nombre": f"{home.get('name')} vs {away.get('name')}",
         "liga": game.get("competitionDisplayName") or game.get("stageName") or "365Scores",
         "marcador": marcador,
         "minuto": int(minuto) if minuto is not None else None,
-        "hora": "",
+        "hora": hora,
+        "fecha": fecha,
         "estado": status if _es_vivo(game) else status,
         "fixture_id": game.get("id"),
         "modo": "365scores",
@@ -191,6 +205,34 @@ def listar_partidos_vivo_sync() -> list[dict]:
     return partidos
 
 
+def listar_partidos_hoy_sync() -> list[dict]:
+    """Lista partidos aún no iniciados del día local."""
+    data = _http_get_json("/games/allscores/", sports="1", startDate=_fecha_365(), endDate=_fecha_365())
+    partidos = []
+    for game in (data or {}).get("games") or []:
+        if game.get("statusGroup") != 2:
+            continue
+        partido = _evento_desde_listado(game)
+        if partido:
+            partido["estado"] = partido["hora"] or partido["estado"] or "Programado"
+            partidos.append(partido)
+    return partidos
+
+
+def listar_partidos_proximos_sync(dias=7) -> list[dict]:
+    """Lista encuentros programados desde mañana hasta `dias` días."""
+    data = _http_get_json("/games/allscores/", sports="1", startDate=_fecha_365(1), endDate=_fecha_365(dias))
+    partidos = []
+    for game in (data or {}).get("games") or []:
+        if game.get("statusGroup") != 2:
+            continue
+        partido = _evento_desde_listado(game)
+        if partido:
+            partido["estado"] = f"📅 {partido['fecha']} · {partido['hora']}"
+            partidos.append(partido)
+    return partidos
+
+
 async def listar_partidos_vivo(page=None) -> list[dict]:
     """Lista partidos en vivo (page ignorado; API directa)."""
     return await asyncio.to_thread(listar_partidos_vivo_sync)
@@ -198,14 +240,15 @@ async def listar_partidos_vivo(page=None) -> list[dict]:
 
 def _parsear_estadisticas(stats_data: dict | None, home_id: int, away_id: int) -> dict:
     stats = {
-        "posesion": {"local": 50.0, "visitante": 50.0},
-        "tiros": {"local": 0, "visitante": 0},
-        "tiros_puerta": {"local": 0, "visitante": 0},
-        "saques_esquina": {"local": 0, "visitante": 0},
-        "tarjetas_amarillas": {"local": 0, "visitante": 0},
-        "tarjetas_rojas": {"local": 0, "visitante": 0},
-        "faltas": {"local": 0, "visitante": 0},
-        "fueras_juego": {"local": 0, "visitante": 0},
+        "posesion": {"local": None, "visitante": None},
+        "tiros": {"local": None, "visitante": None},
+        "tiros_puerta": {"local": None, "visitante": None},
+        "saques_esquina": {"local": None, "visitante": None},
+        "tarjetas_amarillas": {"local": None, "visitante": None},
+        "tarjetas_rojas": {"local": None, "visitante": None},
+        "faltas": {"local": None, "visitante": None},
+        "fueras_juego": {"local": None, "visitante": None},
+        "xg": {"local": None, "visitante": None},
     }
     if not stats_data:
         return stats
@@ -220,11 +263,14 @@ def _parsear_estadisticas(stats_data: dict | None, home_id: int, away_id: int) -
         lado = "local" if cid == home_id else "visitante" if cid == away_id else None
         if not lado:
             continue
-        acumulado.setdefault(clave, {})[lado] = _parse_num(item.get("value"))
+        raw = str(item.get("value") if item.get("value") is not None else "").strip()
+        if not re.fullmatch(r"\d+(?:[.,]\d+)?%?", raw):
+            continue
+        acumulado.setdefault(clave, {})[lado] = float(raw.rstrip("%").replace(",", "."))
 
     for clave, valores in acumulado.items():
         for lado, val in valores.items():
-            if clave == "posesion":
+            if clave in {"posesion", "xg"}:
                 stats[clave][lado] = val
             else:
                 stats[clave][lado] = int(val)
@@ -297,19 +343,17 @@ def _combinar_evento(game_data: dict, stats_data: dict | None) -> dict:
     gl, gv = _marcador_desde_juego(game)
     minuto = _minuto_desde_juego(game)
     status = game.get("statusText") or ""
-    if game.get("statusGroup") == 3 and minuto is None:
+    if minuto is None and status.lower() in {"descanso", "half time", "ht", "medio tiempo"}:
         minuto = 45.0
 
-    marcador = {"local": gl or 0, "visitante": gv or 0}
-    if gl is None or gv is None:
-        marcador = {"local": 0, "visitante": 0}
+    marcador = {"local": gl, "visitante": gv}
 
     stats = _parsear_estadisticas(stats_data, home_id, away_id)
     cronologia = _parsear_cronologia(game, home_id, away_id)
     alineaciones = _parsear_alineaciones(game)
 
-    ataques_l = stats["tiros_puerta"]["local"] or stats["tiros"]["local"]
-    ataques_v = stats["tiros_puerta"]["visitante"] or stats["tiros"]["visitante"]
+    ataques_l = stats["tiros_puerta"]["local"] if stats["tiros_puerta"]["local"] is not None else stats["tiros"]["local"]
+    ataques_v = stats["tiros_puerta"]["visitante"] if stats["tiros_puerta"]["visitante"] is not None else stats["tiros"]["visitante"]
 
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -318,6 +362,7 @@ def _combinar_evento(game_data: dict, stats_data: dict | None) -> dict:
         "posesion": stats["posesion"],
         "tiros": stats["tiros"],
         "tiros_puerta": stats["tiros_puerta"],
+        "xg": stats["xg"],
         "saques_esquina": stats["saques_esquina"],
         "tarjetas_amarillas": stats["tarjetas_amarillas"],
         "tarjetas_rojas": stats["tarjetas_rojas"],
@@ -340,8 +385,10 @@ def _combinar_evento(game_data: dict, stats_data: dict | None) -> dict:
 
 async def obtener_evento_365scores(game_id: str) -> dict:
     """Obtiene datos completos de un partido."""
-    game_data = await asyncio.to_thread(_http_get_json, "/game/", gameId=game_id, topBookmaker="14")
-    stats_data = await asyncio.to_thread(_http_get_json, "/game/stats/", games=game_id)
+    game_data, stats_data = await asyncio.gather(
+        asyncio.to_thread(_http_get_json, "/game/", gameId=game_id, topBookmaker="14"),
+        asyncio.to_thread(_http_get_json, "/game/stats/", games=game_id),
+    )
 
     if not game_data or not game_data.get("game"):
         return _evento_nulo()
@@ -349,11 +396,12 @@ async def obtener_evento_365scores(game_id: str) -> dict:
     evento = _combinar_evento(game_data, stats_data)
     eq = evento["_equipos"]
     logger.info(
-        "365Scores: %s %s-%s %s | min %s | pos %.0f-%.0f%% | remates %d-%d | eventos %d",
+        "365Scores: %s %s-%s %s | min %s | pos %s-%s%% | remates %s-%s | eventos %d",
         eq["local"], evento["marcador"]["local"], evento["marcador"]["visitante"],
         eq["visitante"], evento.get("minuto"),
         evento["posesion"]["local"], evento["posesion"]["visitante"],
-        evento["tiros"]["local"], evento["tiros"]["visitante"],
+        evento["tiros"]["local"] if evento["tiros"]["local"] is not None else "—",
+        evento["tiros"]["visitante"] if evento["tiros"]["visitante"] is not None else "—",
         len(evento["_cronologia"]),
     )
     return evento

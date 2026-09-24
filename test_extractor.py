@@ -5,7 +5,7 @@ from extractor_flashscore import obtener_evento_flashscore, _crear_browser
 
 logging.basicConfig(level=logging.INFO)
 
-async def test_extractor(fixture_id):
+async def probar_extractor_manual(fixture_id):
     pw, browser, page = await _crear_browser()
     print(f"Buscando estadísticas para: {fixture_id}...")
     try:
@@ -28,4 +28,4 @@ if __name__ == "__main__":
         fid = sys.argv[1]
     else:
         fid = "jJucpA84" # España vs Austria
-    asyncio.run(test_extractor(fid))
+    asyncio.run(probar_extractor_manual(fid))

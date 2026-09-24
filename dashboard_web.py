@@ -14,10 +14,14 @@ import os
 import socket
 import threading
 import time
+import queue
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Callable
+from urllib.parse import parse_qs, urlparse
+from calidad_vivo import evaluar as evaluar_calidad
 
 logger = logging.getLogger("dashboard_web")
 
@@ -31,6 +35,14 @@ _lock = threading.Lock()
 _servidor: ThreadingHTTPServer | None = None
 _hilo: threading.Thread | None = None
 _revision_web: int = 0
+_controles: dict[str, Callable] = {}
+_WEB_DIR = Path(__file__).with_name("web")
+
+
+def configurar_controles(**controles: Callable) -> None:
+    """Registra acciones del modo web: listar, seleccionar y detener."""
+    global _controles
+    _controles = controles
 
 
 def _serializar(obj):
@@ -48,7 +60,8 @@ def _calcular_deltas(valores: list) -> list:
         return []
     deltas = [0]  # El primer valor no tiene incremento previo
     for i in range(1, len(valores)):
-        deltas.append(max(0, valores[i] - valores[i - 1]))
+        deltas.append(max(0, valores[i] - valores[i - 1])
+                      if valores[i] is not None and valores[i - 1] is not None else None)
     return deltas
 
 
@@ -72,7 +85,7 @@ def construir_serie_temporal(buffer: list) -> dict:
     minutos, r_l, r_v, a_l, a_v, p_l, p_v, t_l, t_v, at_l, at_v = [], [], [], [], [], [], [], [], [], [], []
 
     for ev in buffer[-60:]:
-        minutos.append(ev.get("minuto", 0))
+        minutos.append(ev.get("minuto") or 0)
         r_l.append(ev.get("riesgo_gol_local", 0) or 0)
         r_v.append(ev.get("riesgo_gol_visitante", 0) or 0)
         a_l.append(ev.get("animo_local", 0) or 0)
@@ -97,20 +110,6 @@ def construir_serie_temporal(buffer: list) -> dict:
     # Calcular deltas ANTES de inyectar el cero artificial inicial
     deltas_at_l = _calcular_deltas(at_l)
     deltas_at_v = _calcular_deltas(at_v)
-
-    # Insertar punto base en minuto 0 para que las gráficas arranquen desde 0
-    if minutos and minutos[0] > 0:
-        minutos.insert(0, 0)
-        r_l.insert(0, 0)
-        r_v.insert(0, 0)
-        a_l.insert(0, 0)
-        a_v.insert(0, 0)
-        p_l.insert(0, None)   # Sin dato real de posesión al inicio
-        p_v.insert(0, None)
-        t_l.insert(0, 0)
-        t_v.insert(0, 0)
-        deltas_at_l.insert(0, 0)
-        deltas_at_v.insert(0, 0)
 
     return {
         "minutos": minutos,
@@ -137,6 +136,17 @@ def empaquetar_estado(
     """Construye el payload JSON completo para el dashboard."""
     eq = ultimo.get("_equipos", {}) or {}
     marcador = ultimo.get("marcador", {}) or {}
+    calidad = evaluar_calidad(ultimo)
+    prediccion = dict(prediccion or {})
+    estado_prediccion = "disponible" if prediccion else "esperando"
+    if prediccion and ultimo.get("minuto") is not None:
+        if not calidad["vigente"]:
+            prediccion, estado_prediccion = {}, "datos_retrasados"
+        elif prediccion.get("minuto_prediccion") is not None and (
+            prediccion["minuto_prediccion"] != ultimo.get("minuto")
+            or prediccion.get("marcador_observado") != marcador
+        ):
+            prediccion, estado_prediccion = {}, "recalculando"
 
     return {
         "partido": meta.get("nombre", "Partido en vivo"),
@@ -146,19 +156,24 @@ def empaquetar_estado(
             "visitante": eq.get("visitante", "Visitante"),
         },
         "marcador": {
-            "local": marcador.get("local", 0) if isinstance(marcador, dict) else 0,
-            "visitante": marcador.get("visitante", 0) if isinstance(marcador, dict) else 0,
+            "local": marcador.get("local") if isinstance(marcador, dict) else None,
+            "visitante": marcador.get("visitante") if isinstance(marcador, dict) else None,
         },
         "minuto": ultimo.get("minuto"),
         "status": ultimo.get("_status", ""),
         "metricas": {
-            "riesgo_gol_local": ultimo.get("riesgo_gol_local", 0),
-            "riesgo_gol_visitante": ultimo.get("riesgo_gol_visitante", 0),
-            "animo_local": ultimo.get("animo_local", 0),
-            "animo_visitante": ultimo.get("animo_visitante", 0),
-            "posesion_local": (ultimo.get("posesion") or {}).get("local", 50),
-            "posesion_visitante": (ultimo.get("posesion") or {}).get("visitante", 50),
+            "riesgo_gol_local": ultimo.get("riesgo_gol_local") if any((ultimo.get(k) or {}).get("local") is not None for k in ("tiros", "ataques_peligrosos")) else None,
+            "riesgo_gol_visitante": ultimo.get("riesgo_gol_visitante") if any((ultimo.get(k) or {}).get("visitante") is not None for k in ("tiros", "ataques_peligrosos")) else None,
+            "animo_local": ultimo.get("animo_local") if calidad["disponibles"] else None,
+            "animo_visitante": ultimo.get("animo_visitante") if calidad["disponibles"] else None,
+            "posesion_local": (ultimo.get("posesion") or {}).get("local"),
+            "posesion_visitante": (ultimo.get("posesion") or {}).get("visitante"),
         },
+        "calidad": calidad,
+        "estado_prediccion": estado_prediccion,
+        "estadisticas": {k: ultimo.get(k) or {} for k in (
+            "posesion", "tiros", "tiros_puerta", "saques_esquina", "tarjetas_amarillas", "tarjetas_rojas", "xg")},
+        "alineaciones": ultimo.get("_alineaciones", {}),
         "prediccion": prediccion or {},
         "historial_mc": historial_mc or [],
         "series": construir_serie_temporal(buffer),
@@ -179,11 +194,11 @@ def sesion_id() -> str:
 
 def obtener_estado_servido() -> dict:
     """Estado cacheado (misma fuente que ve la terminal)."""
-    if _estado_cache:
-        return _estado_cache
     if _get_estado:
-        return _get_estado()
-    return {}
+        estado = _get_estado()
+        estado.setdefault("servidor", {})["revision"] = _revision_web
+        return estado
+    return _estado_cache
 
 
 def publicar_estado(estado: dict) -> None:
@@ -426,13 +441,13 @@ HTML_DASHBOARD = """<!DOCTYPE html>
 </section>
 
 <div class="grid">
-  <div class="card"><h2>🔥 Riesgo de Gol en Vivo</h2><canvas id="chartRiesgo"></canvas></div>
+  <div class="card"><h2>🔥 Índice de presión en Vivo</h2><canvas id="chartRiesgo"></canvas></div>
   <div class="card"><h2>📊 Posesión (%)</h2><canvas id="chartPosesion"></canvas></div>
   <div class="card"><h2>💪 Ánimo / Momentum</h2><canvas id="chartAnimo"></canvas></div>
   <div class="card"><h2>🎯 Ataques Peligrosos (incremento reciente)</h2><canvas id="chartAtaques"></canvas></div>
   <div class="card"><h2>🏆 Probabilidades 1X2</h2><canvas id="chart1x2"></canvas></div>
   <div class="card"><h2>📈 Over/Under & BTTS</h2><canvas id="chartOver"></canvas></div>
-  <div class="card"><h2>⚽ Próximo Gol</h2><canvas id="chartProxGol"></canvas></div>
+  <div class="card"><h2>⚽ Próximo Gol · modelo experimental</h2><canvas id="chartProxGol"></canvas></div>
   <div class="card"><h2>🎲 Marcadores Simulados (Monte Carlo)</h2><canvas id="chartMarcadores"></canvas></div>
   <div class="card"><h2>📉 Distribución Goles Totales</h2><canvas id="chartHist"></canvas></div>
 </div>
@@ -502,8 +517,8 @@ function renderKPIs(d) {
   const eq = d.equipos || {};
   const rl = (m.riesgo_gol_local||0), rv = (m.riesgo_gol_visitante||0);
   const kpis = [
-    { lbl: `Riesgo ${eq.local||'Local'}`, val: rl.toFixed(1)+'%', cls: rl > 70 ? 'danger' : 'local' },
-    { lbl: `Riesgo ${eq.visitante||'Visit.'}`, val: rv.toFixed(1)+'%', cls: rv > 70 ? 'danger' : 'visit' },
+    { lbl: `Presión ${eq.local||'Local'}`, val: rl.toFixed(1)+'/100', cls: rl > 70 ? 'danger' : 'local' },
+    { lbl: `Presión ${eq.visitante||'Visit.'}`, val: rv.toFixed(1)+'/100', cls: rv > 70 ? 'danger' : 'visit' },
     { lbl: `Ánimo ${eq.local||'Local'}`, val: (m.animo_local||0).toFixed(1)+'%', cls: 'local' },
     { lbl: `Posesión ${eq.local||'Local'}`, val: (m.posesion_local||0)+'%', cls: 'local' },
     { lbl: `Victoria ${eq.local||'Local'}`, val: (p.prob_1x2_local||0).toFixed(1)+'%', cls: 'local' },
@@ -512,9 +527,10 @@ function renderKPIs(d) {
     { lbl: 'Marcador Prob.', val: p.marcador_mas_probable||'—', cls: 'neutral' },
     { lbl: 'Over 2.5', val: (p.prob_over_2_5||0).toFixed(1)+'%', cls: 'neutral' },
     { lbl: 'BTTS', val: (p.prob_btts||0).toFixed(1)+'%', cls: 'neutral' },
-    { lbl: `xG ${eq.local||'Local'}`, val: (p.goles_esperados_local||0).toFixed(2), cls: 'local' },
-    { lbl: `xG ${eq.visitante||'Visit.'}`, val: (p.goles_esperados_visitante||0).toFixed(2), cls: 'visit' },
+    { lbl: `Goles esp. ${eq.local||'Local'}`, val: (p.goles_esperados_local||0).toFixed(2), cls: 'local' },
+    { lbl: `Goles esp. ${eq.visitante||'Visit.'}`, val: (p.goles_esperados_visitante||0).toFixed(2), cls: 'visit' },
   ];
+  if (!Object.keys(p).length) kpis.slice(4).forEach(k => { k.val = '—'; });
   document.getElementById('kpis').innerHTML = kpis.map(k =>
     `<div class="kpi ${k.cls}"><div class="val">${k.val}</div><div class="lbl">${k.lbl}</div></div>`
   ).join('');
@@ -559,11 +575,11 @@ function renderHeatmapMC(d) {
   probs.forEach(row => row.forEach(v => { if (v > maxProb) maxProb = v; }));
 
   let html = '<table class="heatmap-table"><thead><tr><th class="corner">Local ↓ / Visit. →</th>';
-  for (let v = 0; v <= maxG; v++) html += `<th>${v}</th>`;
+  for (let v = 0; v <= maxG; v++) html += `<th>${v === maxG ? maxG+'+' : v}</th>`;
   html += '</tr></thead><tbody>';
 
   for (let l = 0; l <= maxG; l++) {
-    html += `<tr><th>${l}</th>`;
+    html += `<tr><th>${l === maxG ? maxG+'+' : l}</th>`;
     for (let v = 0; v <= maxG; v++) {
       const prob = probs[l]?.[v] ?? 0;
       const isCurrent = marc.local === l && marc.visitante === v;
@@ -588,9 +604,9 @@ function renderMcMeta(d) {
   host.innerHTML = [
     `<span>${p.n_iteraciones} simulaciones</span>`,
     `<span>Marcador más probable: <strong style="color:#f0c040">${p.marcador_mas_probable||'—'}</strong></span>`,
-    `<span>IC95 goles totales: ${ic.min ?? '—'} – ${ic.max ?? '—'}</span>`,
+    `<span>Intervalo predictivo 95% goles totales: ${ic.min ?? '—'} – ${ic.max ?? '—'}</span>`,
     `<span>Tiempo restante simulado: ${(p.tiempo_restante||0).toFixed(0)}'</span>`,
-    `<span>xG final L/V: ${(p.goles_esperados_local||0).toFixed(2)} / ${(p.goles_esperados_visitante||0).toFixed(2)}</span>`,
+    `<span>Goles esp. final L/V: ${(p.goles_esperados_local||0).toFixed(2)} / ${(p.goles_esperados_visitante||0).toFixed(2)}</span>`,
   ].join('');
 }
 
@@ -674,11 +690,11 @@ function renderTips(d) {
   const p = d.prediccion || {};
   const m = d.metricas || {};
   const eq = d.equipos || {};
-  if ((m.riesgo_gol_local||0) > 80) items.push({t: `⚡ EN VIVO: Gol inminente ${eq.local||'LOCAL'}`, a: true});
-  if ((m.riesgo_gol_visitante||0) > 80) items.push({t: `⚡ EN VIVO: Gol inminente ${eq.visitante||'VISITANTE'}`, a: true});
-  if ((p.prob_prox_gol_local||0) > 65) items.push({t: `🔥 Alta probabilidad de próximo gol ${eq.local||'LOCAL'}`});
-  if ((p.prob_prox_gol_visitante||0) > 65) items.push({t: `🔥 Alta probabilidad de próximo gol ${eq.visitante||'VISITANTE'}`});
-  if ((p.prob_over_2_5||0) > 75) items.push({t: '📈 Over 2.5 goles con valor alto'});
+  if ((m.riesgo_gol_local||0) > 80) items.push({t: `⚡ EN VIVO: Presión alta (índice) ${eq.local||'LOCAL'}`, a: true});
+  if ((m.riesgo_gol_visitante||0) > 80) items.push({t: `⚡ EN VIVO: Presión alta (índice) ${eq.visitante||'VISITANTE'}`, a: true});
+  if ((p.prob_prox_gol_local||0) > 65) items.push({t: `🔥 Probabilidad de anotar en el resto: ${eq.local||'LOCAL'}`});
+  if ((p.prob_prox_gol_visitante||0) > 65) items.push({t: `🔥 Probabilidad de anotar en el resto: ${eq.visitante||'VISITANTE'}`});
+  if ((p.prob_over_2_5||0) > 75) items.push({t: '📈 Over 2.5 probable según el modelo experimental'});
   if ((p.prob_btts||0) > 70) items.push({t: '⚽ Ambos equipos marcarán (BTTS) con alta probabilidad'});
   (d.jugadores||[]).forEach(j => items.push({t: '👤 ' + j}));
   if (!items.length) items.push({t: 'Esperando más datos en vivo...'});
@@ -859,29 +875,89 @@ conectarSSE();
 
 
 class _DashboardHandler(BaseHTTPRequestHandler):
+    def handle(self):
+        try:
+            super().handle()
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+            pass
+
     def log_message(self, format, *args):
         pass  # Silenciar logs HTTP
 
     def _cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
 
+    def _json(self, data, status=200):
+        payload = json.dumps(data, default=_serializar).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self._cors()
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def _archivo(self, nombre, content_type):
+        path = (_WEB_DIR / nombre).resolve()
+        if path.parent != _WEB_DIR.resolve() or not path.is_file():
+            self.send_response(404)
+            self.end_headers()
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        self.wfile.write(path.read_bytes())
+
+    def _body_json(self):
+        try:
+            size = int(self.headers.get("Content-Length", "0"))
+            if size <= 0 or size > 32_768:
+                raise ValueError("Cuerpo JSON vacío o demasiado grande")
+            data = json.loads(self.rfile.read(size).decode("utf-8"))
+            if not isinstance(data, dict):
+                raise ValueError("Se esperaba un objeto JSON")
+            return data
+        except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            self._json({"ok": False, "error": str(exc)}, 400)
+            return None
+
     def do_GET(self):
-        if self.path == "/" or self.path == "/index.html":
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
+        parsed = urlparse(self.path)
+        path = parsed.path
+        if path == "/favicon.ico":
+            self.send_response(204)
             self.end_headers()
-            self.wfile.write(HTML_DASHBOARD.encode())
+        elif path in ("/", "/index.html"):
+            if (_WEB_DIR / "index.html").is_file():
+                self._archivo("index.html", "text/html; charset=utf-8")
+            else:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(HTML_DASHBOARD.encode())
 
-        elif self.path == "/api/data":
-            estado = obtener_estado_servido()
-            payload = json.dumps(estado, default=_serializar).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self._cors()
-            self.end_headers()
-            self.wfile.write(payload)
+        elif path == "/app.js":
+            self._archivo("app.js", "text/javascript; charset=utf-8")
 
-        elif self.path == "/api/stream":
+        elif path == "/styles.css":
+            self._archivo("styles.css", "text/css; charset=utf-8")
+
+        elif path == "/api/data":
+            self._json(obtener_estado_servido())
+
+        elif path == "/api/partidos":
+            callback = _controles.get("listar")
+            if not callback:
+                self._json({"ok": False, "error": "Selector web no configurado"}, 503)
+                return
+            try:
+                categoria = parse_qs(parsed.query).get("categoria", ["todos"])[0]
+                self._json({"ok": True, "partidos": callback(categoria)})
+            except Exception as exc:
+                logger.exception("Error listando partidos")
+                self._json({"ok": False, "error": str(exc)}, 502)
+
+        elif path == "/api/stream":
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
             self.send_header("Cache-Control", "no-cache, no-transform")
@@ -891,8 +967,9 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
             wfile = self.wfile
+            mensajes = queue.Queue(maxsize=2)
             with _lock:
-                _clientes_sse.append(wfile)
+                _clientes_sse.append(mensajes)
 
             try:
                 estado = obtener_estado_servido()
@@ -903,41 +980,68 @@ class _DashboardHandler(BaseHTTPRequestHandler):
 
                 # Mantener la conexión abierta; si el handler termina, el socket se cierra
                 # y el navegador deja de recibir actualizaciones en vivo.
+                self.connection.settimeout(10)
                 while True:
-                    time.sleep(15)
-                    wfile.write(b": heartbeat\n\n")
+                    try:
+                        payload = mensajes.get(timeout=15)
+                    except queue.Empty:
+                        payload = b": heartbeat\n\n"
+                    wfile.write(payload)
                     wfile.flush()
             except (BrokenPipeError, ConnectionResetError, OSError, ValueError):
                 pass
             finally:
                 with _lock:
-                    if wfile in _clientes_sse:
-                        _clientes_sse.remove(wfile)
+                    if mensajes in _clientes_sse:
+                        _clientes_sse.remove(mensajes)
 
         else:
             self.send_response(404)
             self.end_headers()
 
+    def do_POST(self):
+        path = urlparse(self.path).path
+        callback = {
+            "/api/seleccionar": _controles.get("seleccionar"),
+            "/api/detener": _controles.get("detener"),
+        }.get(path)
+        if callback is None:
+            self._json({"ok": False, "error": "Ruta o acción no disponible"}, 404)
+            return
+        data = self._body_json()
+        if data is None:
+            return
+        try:
+            resultado = callback(data) if path == "/api/seleccionar" else callback()
+            self._json({"ok": True, **(resultado or {})})
+        except ValueError as exc:
+            self._json({"ok": False, "error": str(exc)}, 400)
+        except Exception as exc:
+            logger.exception("Error ejecutando control web")
+            self._json({"ok": False, "error": str(exc)}, 500)
+
     def do_OPTIONS(self):
         self.send_response(204)
         self._cors()
-        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
 
 
 def notificar_clientes(estado: dict) -> None:
     """Envía actualización SSE a todos los clientes conectados."""
     payload = f"data: {json.dumps(estado, default=_serializar)}\n\n".encode()
-    muertos = []
     with _lock:
-        for wfile in _clientes_sse:
+        for mensajes in _clientes_sse:
             try:
-                wfile.write(payload)
-                wfile.flush()
-            except Exception:
-                muertos.append(wfile)
-        for w in muertos:
-            _clientes_sse.remove(w)
+                mensajes.put_nowait(payload)
+            except queue.Full:
+                # Un navegador lento conserva el estado más reciente sin frenar el motor.
+                try:
+                    mensajes.get_nowait()
+                except queue.Empty:
+                    pass
+                mensajes.put_nowait(payload)
 
 
 def iniciar(get_estado: Callable[[], dict], puerto: int = PUERTO, sesion: str = "") -> int:
@@ -953,7 +1057,8 @@ def iniciar(get_estado: Callable[[], dict], puerto: int = PUERTO, sesion: str = 
         logger.warning("Puerto %d ocupado, usando %d", puerto, puerto_real)
 
     ThreadingHTTPServer.allow_reuse_address = True
-    _servidor = ThreadingHTTPServer(("0.0.0.0", puerto_real), _DashboardHandler)
+    ThreadingHTTPServer.daemon_threads = True
+    _servidor = ThreadingHTTPServer(("127.0.0.1", puerto_real), _DashboardHandler)
     _hilo = threading.Thread(target=_servidor.serve_forever, daemon=True)
     _hilo.start()
     logger.info("Dashboard web iniciado en http://localhost:%d (sesión %s)", puerto_real, sesion)
@@ -963,10 +1068,13 @@ def iniciar(get_estado: Callable[[], dict], puerto: int = PUERTO, sesion: str = 
 
 
 def detener() -> None:
-    global _servidor
+    global _servidor, _hilo, _puerto_activo
     if _servidor:
         _servidor.shutdown()
+        _servidor.server_close()
         _servidor = None
+    _hilo = None
+    _puerto_activo = None
 
 
 def _puerto_libre(puerto: int, max_intentos: int = 10) -> int:
@@ -975,7 +1083,7 @@ def _puerto_libre(puerto: int, max_intentos: int = 10) -> int:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
-                sock.bind(("0.0.0.0", candidato))
+                sock.bind(("127.0.0.1", candidato))
                 return candidato
             except OSError:
                 continue

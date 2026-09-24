@@ -48,8 +48,11 @@ def calcular_deltas_recientes(df_buffer: pd.DataFrame, campo: str) -> float:
     if df_buffer.empty or campo not in df_buffer.columns:
         return 0.0
     
-    val_reciente = df_buffer[campo].iloc[-1]
-    val_antiguo = df_buffer[campo].iloc[0]
+    valores = pd.to_numeric(df_buffer[campo], errors="coerce").dropna()
+    if len(valores) < 2:
+        return 0.0
+    val_reciente = valores.iloc[-1]
+    val_antiguo = valores.iloc[0]
     return max(0.0, float(val_reciente - val_antiguo))
 
 
@@ -63,7 +66,8 @@ def calcular_riesgo_gol_dinamico(df_buffer: pd.DataFrame, es_local: bool) -> flo
     delta_ataques = calcular_deltas_recientes(df_buffer, f"ataques_peligrosos_{sufijo}")
     
     # Tiempo transcurrido en el buffer (basado en polling real, no en el reloj del partido)
-    minutos_ventana = max(1.0, len(df_buffer) * (POLL_INTERVAL_REF / 60.0))
+    minutos = pd.to_numeric(df_buffer.get("minuto", pd.Series(dtype=float)), errors="coerce").dropna()
+    minutos_ventana = max(1.0, float(minutos.iloc[-1] - minutos.iloc[0])) if len(minutos) > 1 else 1.0
 
     tasa_tiros = delta_tiros / minutos_ventana
     tasa_ataques = delta_ataques / minutos_ventana
@@ -71,8 +75,13 @@ def calcular_riesgo_gol_dinamico(df_buffer: pd.DataFrame, es_local: bool) -> flo
     # Si acaba de arrancar y no hay historial (menos de 2 min reales)
     if minutos_ventana < 2.0 and not df_buffer.empty and "minuto" in df_buffer.columns:
         min_total = max(1.0, df_buffer["minuto"].iloc[-1])
-        tasa_tiros = df_buffer[f"tiros_{sufijo}"].iloc[-1] / min_total
-        tasa_ataques = df_buffer[f"ataques_peligrosos_{sufijo}"].iloc[-1] / min_total
+        def reciente(campo):
+            if campo not in df_buffer:
+                return 0.0
+            valor = df_buffer[campo].iloc[-1]
+            return float(valor) if pd.notna(valor) else 0.0
+        tasa_tiros = reciente(f"tiros_{sufijo}") / min_total
+        tasa_ataques = reciente(f"ataques_peligrosos_{sufijo}") / min_total
 
     componente = (tasa_tiros * 0.40) + (tasa_ataques * 0.60)
     
@@ -93,8 +102,8 @@ def calcular_animo_dinamico(df_buffer: pd.DataFrame) -> tuple[float, float]:
     
     # Fallback histórico si la ventana es muy corta
     if not df_buffer.empty and df_buffer["minuto"].iloc[-1] - df_buffer["minuto"].iloc[0] < 2.0:
-        delta_loc = df_buffer["ataques_peligrosos_local"].iloc[-1]
-        delta_vis = df_buffer["ataques_peligrosos_visitante"].iloc[-1]
+        delta_loc = df_buffer.get("ataques_peligrosos_local", pd.Series([0])).fillna(0).iloc[-1]
+        delta_vis = df_buffer.get("ataques_peligrosos_visitante", pd.Series([0])).fillna(0).iloc[-1]
 
     acc_total = delta_loc + delta_vis
 
@@ -113,8 +122,6 @@ def calcular_animo_dinamico(df_buffer: pd.DataFrame) -> tuple[float, float]:
         ratio = delta_loc / acc_total
 
     animo_local = ratio * 100
-    if ratio > PROB_CONV_ATAQUE:
-        animo_local = min(100.0, animo_local * BONUS_ANIMO)
 
     animo_visitante = 100.0 - animo_local
     return animo_local, animo_visitante
@@ -129,6 +136,10 @@ class MotorMetricas:
     def agregar_evento(self, evento: dict) -> None:
         """Agrega un evento al buffer y recorta a VENTANA_EVENTOS filas."""
         plano = _aplanar_evento(evento)
+        if not self.df_buffer.empty and "minuto" in plano:
+            if plano["minuto"] < self.df_buffer["minuto"].iloc[-1]:
+                return
+            self.df_buffer = self.df_buffer[self.df_buffer["minuto"] != plano["minuto"]]
         nueva_fila = pd.DataFrame([plano])
         self.df_buffer = pd.concat(
             [self.df_buffer, nueva_fila], ignore_index=True
@@ -177,12 +188,13 @@ async def iniciar(raw_queue: asyncio.Queue, metrics_queue: asyncio.Queue) -> Non
     _motor = MotorMetricas()
 
     logger.info("Motor de métricas iniciado.")
+    ultimo_minuto = None
 
     while True:
         evento = await raw_queue.get()
 
         # Verificar campos None críticos
-        campos_numericos = ["minuto", "tiros", "ataques_peligrosos"]
+        campos_numericos = ["minuto", "marcador"]
         tiene_nulos = False
         for campo in campos_numericos:
             val = evento.get(campo)
@@ -206,6 +218,14 @@ async def iniciar(raw_queue: asyncio.Queue, metrics_queue: asyncio.Queue) -> Non
         # Verificar si estamos en receso (entretiempo, pausa)
         estado_texto = (evento.get("_status") or "").lower()
         es_receso = estado_texto in ("half time", "halftime", "ht", "paused") or "descanso" in estado_texto or "medio tiempo" in estado_texto
+        es_final = estado_texto in ("ft", "finished", "ended", "finalizado", "full time")
+        minuto_evento = float(evento["minuto"])
+        if ultimo_minuto is not None and minuto_evento < ultimo_minuto and not (es_receso or es_final):
+            logger.warning("Consulta con reloj anterior descartada: %s < %s", minuto_evento, ultimo_minuto)
+            raw_queue.task_done()
+            continue
+        if not es_receso:
+            ultimo_minuto = minuto_evento
 
         # Si no es receso, agregamos al buffer para que la ventana de tiempo avance
         if not es_receso:

@@ -1,216 +1,97 @@
-# ⚽ Football Live Agent — Análisis Deportivo en Tiempo Real
+# Football Live Agent
 
-<div align="center">
+Análisis de fútbol con extractores en vivo, dashboards de terminal y web, y predicciones probabilísticas experimentales.
 
-![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)
-![Pandas](https://img.shields.io/badge/Pandas-Data_Engine-150458?style=for-the-badge&logo=pandas&logoColor=white)
-![NumPy](https://img.shields.io/badge/NumPy-Monte_Carlo-013243?style=for-the-badge&logo=numpy&logoColor=white)
-![Asyncio](https://img.shields.io/badge/Asyncio-Concurrent-2496ED?style=for-the-badge&logo=python&logoColor=white)
-![Chart.js](https://img.shields.io/badge/Chart.js-Dashboards-FF6384?style=for-the-badge&logo=chartdotjs&logoColor=white)
-![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
+## Estado de la predicción
 
-**Sistema multi-agente que extrae datos de partidos de fútbol en vivo, calcula métricas propias (riesgo de gol, momentum) y predice resultados finales con simulación Monte Carlo.**
+La revisión estadística y el plan aplicado están en [docs/REVISION_Y_PLAN.md](docs/REVISION_Y_PLAN.md).
 
-[Características](#-características) · [Capturas](#-capturas-de-pantalla) · [Arquitectura](#-arquitectura) · [Instalación](#-instalación) · [Uso](#-uso) · [Stack Técnico](#-stack-técnico)
+El nuevo modelo histórico acertó 51,32% de los resultados 1X2 y 12,89% de los marcadores exactos en los 380 partidos de Premier League 2024–25. Las frecuencias de liga acertaron 40,79%. Esto es una evaluación prepartido retrospectiva, no validación del modelo en vivo ni garantía de aciertos futuros. Resultados y hashes: [evaluacion_2024_25.json](docs/evaluacion_2024_25.json).
 
-</div>
+## Componentes
 
----
+- modelo_poisson.py: distribución independiente de goles. Probabilidades analíticas consistentes para 1X2, totales, BTTS, próximo gol y marcadores. El muestreo sólo alimenta gráficas.
+- modelo_historico.py: ataque/defensa por sede, regularización hacia la media de liga y corte temporal estricto.
+- predecir_partido.py: predicción histórica reproducible sin navegador.
+- evaluar_modelo.py: evaluación cronológica diaria con log loss, Brier, acierto y calibración frente a dos baselines.
+- simulador.py: tasas en vivo regularizadas. Coeficientes de conversión todavía sin calibración histórica.
+- calidad_vivo.py: cobertura, vigencia de la consulta y suspensión de pronósticos con datos retrasados.
+- registro_vivo.py: registro SQLite de pronósticos reales y evaluación posterior con finales observados.
+- motor_metricas.py: índices descriptivos de presión y momentum. Presión no es probabilidad de gol.
+- predictor_previo.py: modelo histórico configurable o H2H exploratorio; abstención con menos de cinco enfrentamientos verificados.
+- extractor_365scores.py: proveedor activo; otros extractores conservados como alternativas.
+- main_agente.py, selector_visual.py y dashboard_web.py: selección y presentación de partidos.
 
-## 🎯 Características
+El modelo histórico no implementa todavía corrección Dixon-Coles, ajuste por expulsiones ni xG por calidad de tiro. El intervalo 95% es predictivo y condicional a las tasas, no una garantía de precisión ni un intervalo de parámetros.
 
-- 📡 **Extracción multi-fuente en tiempo real** — 365Scores, Sofascore, Flashscore (web scraping + API REST)
-- 📊 **Dashboard terminal interactivo** — Métricas en vivo, sparklines ASCII, alertas de riesgo con `Rich`
-- 🌐 **Dashboard web con gráficas** — Chart.js + Server-Sent Events (SSE), actualización en tiempo real
-- 🎲 **Simulación Monte Carlo** (250 iteraciones) — Predicción de marcador final, probabilidades 1X2, Over/Under
-- 📈 **Métricas propias** — Riesgo de Gol y Ánimo/Momentum calculados con ventanas deslizantes en Pandas
-- 🔮 **Predictor pre-partido** — H2H scraping + Poisson + Monte Carlo (5,000 simulaciones) para partidos futuros
-- ⚡ **Arquitectura async** — Pipeline producer/consumer con `asyncio.Queue`, cero bloqueos
-- 🖥️ **Selector visual de partidos** — Interfaz `curses` con navegación por flechas y categorías (En Vivo, Hoy, Próximos)
+## Instalación
 
-## 📸 Capturas de Pantalla
+Python 3.11+ (verificado localmente con 3.12).
 
-### 🖥️ Selector Visual de Partidos (Terminal)
-![Selector de Partidos Terminal](docs/screenshots/terminal_selector.jpg)
-
-### 🌐 Dashboard Web en Tiempo Real
-#### Métricas Principales & Simulación Monte Carlo
-![Dashboard Monte Carlo](docs/screenshots/dashboard_montecarlo.jpg)
-
-#### Gráficas en Vivo (Riesgo de Gol, Posesión y Momentum)
-![Gráficas en Vivo](docs/screenshots/dashboard_live_charts.jpg)
-
-#### Cronología Reciente del Partido
-![Cronología del Partido](docs/screenshots/dashboard_timeline.jpg)
-
-#### Distribuciones & Probabilidades Monte Carlo
-![Distribuciones Monte Carlo](docs/screenshots/dashboard_distributions.jpg)
-
-## 🏗️ Arquitectura
-
-```
-┌─────────────────┐     ┌──────────────┐     ┌─────────────────┐
-│   Extractores   │     │    Motor     │     │   Simulador     │
-│                 │     │  Métricas    │     │  Monte Carlo    │
-│ · 365Scores API │────▶│              │────▶│                 │
-│ · Flashscore    │     │ · Pandas DF  │     │ · Poisson       │
-│ · Sofascore     │ raw │ · Riesgo Gol │ met │ · Binomial      │
-│ · Football-data │ queue│ · Momentum  │rics │ · Top marcadores│
-│   (.org) API    │     │ · Ventana    │queue│ · Over/Under    │
-└─────────────────┘     │   deslizante │     │ · IC 95%        │
-                        └──────────────┘     └────────┬────────┘
-                                                      │
-                              ┌────────────────────────┼──────────────┐
-                              │                        │              │
-                    ┌─────────▼─────────┐   ┌─────────▼─────────┐    │
-                    │  Dashboard Web    │   │ Dashboard Terminal │    │
-                    │                   │   │                   │    │
-                    │ · Chart.js        │   │ · Rich Layout     │    │
-                    │ · SSE stream      │   │ · Sparklines      │    │
-                    │ · Mapa de calor   │   │ · Alertas color   │    │
-                    │ · Nube MC scatter │   │ · Sugerencias     │    │
-                    │ · Evolución 1X2   │   │ · Top marcadores  │    │
-                    └───────────────────┘   └───────────────────┘    │
-                                                                     │
-                                            ┌────────────────────────┘
-                                            │
-                                  ┌─────────▼─────────┐
-                                  │ Predictor Previo  │
-                                  │                   │
-                                  │ · H2H Flashscore  │
-                                  │ · Forma reciente  │
-                                  │ · Wikipedia stats  │
-                                  │ · 5,000 sim. MC   │
-                                  └───────────────────┘
+```powershell
+python -m venv .venv
+.venv/Scripts/python.exe -m pip install -r requirements-dev.txt
+.venv/Scripts/python.exe -m playwright install chromium
+.venv/Scripts/python.exe -m pytest -q
 ```
 
-### Pipeline de datos
+Linux/macOS: usar .venv/bin/python en lugar de .venv/Scripts/python.exe. El navegador es necesario para scraping, no para el modelo histórico ni sus pruebas.
 
-1. **Extractores** hacen polling cada ~20s a APIs/sitios deportivos y producen `GameEvent` (dict con marcador, minuto, tiros, posesión, etc.)
-2. **Motor de Métricas** consume eventos crudos, los aplana en un `DataFrame` de Pandas, y calcula métricas derivadas con ventana deslizante (180 eventos)
-3. **Simulador Monte Carlo** toma los últimos 20 eventos enriquecidos, estima tasas de tiros/goles por minuto, y corre 250 simulaciones Poisson+Binomial del tiempo restante
-4. **Dashboards** renderizan el estado global en paralelo: terminal (Rich) y web (HTTP + SSE embebido)
+## Evaluación y predicción histórica
 
-## 📦 Módulos
+Preparar CSV de una sola liga con columnas Date, HomeTeam, AwayTeam, FTHG, FTAG. Fechas admitidas: YYYY-MM-DD, DD/MM/YYYY y DD/MM/YY. El cargador rechaza duplicados y resultados inválidos.
 
-| Módulo | Líneas | Descripción |
-|---|---|---|
-| `main_agente.py` | 642 | Orquestador principal — asyncio loop, dashboard terminal Rich |
-| `dashboard_web.py` | 908 | Servidor HTTP embebido + SSE + HTML/Chart.js inline |
-| `simulador.py` | 202 | Monte Carlo: Poisson + Binomial, matriz de marcadores, IC95% |
-| `motor_metricas.py` | 237 | Pandas DataFrame buffer, riesgo de gol, ánimo dinámico |
-| `predictor_previo.py` | 585 | Pre-match: H2H scraping, Wikipedia stats, 5K simulaciones |
-| `selector_visual.py` | 555 | Interfaz curses: partidos en vivo / hoy / próximos |
-| `extractor_365scores.py` | 407 | API 365Scores: marcador, stats, cronología, alineaciones |
-| `extractor_sofascore.py` | ~500 | API Sofascore con curl_cffi (anti-bot bypass) |
-| `extractor_flashscore.py` | ~300 | Playwright headless scraping |
-| `extractor_google.py` | ~500 | Google search scraping como fallback |
-| `football_data_client.py` | ~120 | football-data.org REST API client |
+Los CSV usados se descargaron del repositorio [datasets/football-datasets](https://github.com/datasets/football-datasets), temporadas 2324 y 2425 de premier-league, y se guardaron como data/E0-2324.csv y data/E0-2425.csv. data/ no se versiona; las rutas y hashes están en el informe.
 
-## 🚀 Instalación
-
-```bash
-# 1. Clonar el repositorio
-git clone https://github.com/TU_USUARIO/football-live-agent.git
-cd football-live-agent
-
-# 2. Crear entorno virtual
-python3 -m venv .venv
-source .venv/bin/activate
-
-# 3. Instalar dependencias
-pip install -r requirements.txt
-
-# 4. Instalar navegador para Playwright (necesario para scraping)
-python -m playwright install chromium
-
-# 5. (Opcional) Configurar API key de football-data.org
-echo "TU_API_KEY" > api_key.txt
+```powershell
+.venv/Scripts/python.exe evaluar_modelo.py data/E0-2324.csv data/E0-2425.csv --desde 2024-08-01
+.venv/Scripts/python.exe predecir_partido.py --csv data/E0-2324.csv data/E0-2425.csv --local Arsenal --visita Chelsea --fecha 2025-05-01
 ```
 
-### Requisitos
+El ejemplo es retrospectivo: nunca usa resultados del mismo día ni posteriores. Se necesitan al menos 100 partidos previos dentro de 730 días. Revisar los conteos de soporte por equipo; con poca historia domina la media de liga. Actualizar los CSV antes de pronosticar fechas actuales.
 
-- **Python 3.11+**
-- **Dependencias**: Rich, NumPy, Pandas, Playwright, curl_cffi
-- **Sistema**: Linux / macOS / WSL (terminal con soporte curses)
+## En vivo y selector
 
-## 🎮 Uso
-
-### Modo en vivo (partido actual)
-
-```bash
-python main_agente.py
+```powershell
+.venv/Scripts/python.exe web_app.py --open
 ```
 
-1. Se abre el **selector visual** con partidos en vivo (365Scores) y próximos (Flashscore)
-2. Navega con ↑↓, selecciona con Enter
-3. El **dashboard terminal** se actualiza cada 3 segundos
-4. Abre `http://localhost:8765` para el **dashboard web** con gráficas interactivas
+La aplicación completa queda disponible en http://127.0.0.1:8765: selección, cambio de partido, análisis prepartido, datos en vivo y detención. El servidor escucha sólo en la máquina local. Para verificar la interfaz sin depender de proveedores externos: `.venv/Scripts/python.exe web_app.py --demo --open`.
 
-### Modo pre-partido (predicción)
+El flujo anterior de terminal sigue disponible con `.venv/Scripts/python.exe main_agente.py`; su selector requiere una terminal compatible con curses.
 
-Selecciona un partido futuro en el selector → se ejecuta automáticamente el **predictor previo**:
-- Scraping H2H de Flashscore
-- Búsqueda de goleadores en Wikipedia
-- 5,000 simulaciones Monte Carlo
-- Dashboard completo con sugerencias
+Para usar el modelo histórico en la selección de partidos futuros, configurar `FOOTBALL_HISTORY` con las rutas de los CSV (separadas por `;` en Windows). La fecha llega desde el partido elegido y los nombres de los equipos deben coincidir con los CSV. Sin un histórico compatible, la web muestra un prior general claramente advertido; los partidos guardados de Flashscore pueden usar el H2H exploratorio y se abstienen si no hay cinco enfrentamientos verificables.
 
-## 🛠️ Stack Técnico
+El horizonte en vivo predeterminado es 90 minutos. MATCH_DURATION permite un horizonte conocido de descuento. Si se alcanza el horizonte y el proveedor no confirma finalización, se suspende la predicción en lugar de presentar certeza de resultado final.
 
-| Categoría | Tecnologías |
-|---|---|
-| **Lenguaje** | Python 3.11+ |
-| **Async** | `asyncio`, `asyncio.Queue`, `asyncio.to_thread` |
-| **Data** | Pandas (DataFrame buffer), NumPy (Monte Carlo) |
-| **Scraping** | Playwright (headless Chromium), curl_cffi (TLS fingerprint) |
-| **Terminal UI** | Rich (Layout, Table, Sparklines, Live) |
-| **Web** | HTTP server stdlib + SSE, Chart.js 4.x |
-| **Estadística** | Distribución Poisson, Binomial, Intervalos de confianza 95% |
-| **APIs** | 365Scores (REST), football-data.org (REST) |
+## Verificación
 
-## 📊 Métricas que calcula
+35 pruebas automatizadas de coherencia, entradas inválidas, cierre de partido, ceros frente a ausencias, ausencia de fuga temporal, pipeline simulado, rutas HTTP, vigencia, cambios de partido, regresiones del reloj, clientes lentos y evaluación del registro en vivo. CI configurada en `.github/workflows/tests.yml`. El scraping real depende de la disponibilidad y estructura de los proveedores y no se valida con estas pruebas.
 
-### En vivo
-- **Riesgo de Gol** — % probabilidad de gol basado en tasa de tiros/ataques peligrosos por minuto
-- **Ánimo / Momentum** — Quién está dominando los ataques en la ventana reciente
-- **Sparklines** — Mini gráficas ASCII de tendencia para cada métrica
+## Observatorio en vivo
 
-### Predicción (Monte Carlo)
-- **1X2** — Probabilidades de Victoria Local / Empate / Victoria Visitante
-- **Over/Under** — 1.5, 2.5, 3.5 goles
-- **BTTS** — Ambos marcan
-- **Marcador más probable** — Moda de 250 simulaciones
-- **IC 95%** — Intervalo de confianza para goles totales
-- **Mapa de calor** — Matriz de probabilidades de marcadores finales
-- **xG** — Goles esperados por equipo
+La interfaz incluye próximo gol (local, visitante o ninguno), gol en los siguientes 10 minutos —limitados por el horizonte restante—, evolución del 1X2, estadísticas comparadas, marcadores alternativos, favoritos locales, filtro de competición y exportación JSON. El modo demo tiene reloj acelerado y datos sintéticos identificados.
 
-## 📁 Estructura del proyecto
+El modelo usa xG observado si el proveedor lo suministra; si no, utiliza remates a puerta, remates totales o el prior. No inventa xG de calidad de tiro. El histórico configurado también inicializa el análisis en vivo cuando hay al menos cinco partidos por equipo/sede. Conserva el corte temporal anterior a la fecha del encuentro. Los parámetros en vivo no están calibrados y las expulsiones se advierten sin aplicar multiplicadores arbitrarios.
 
-```
-.
-├── main_agente.py           # Orquestador principal + dashboard terminal
-├── dashboard_web.py         # Servidor web embebido + Chart.js
-├── simulador.py             # Monte Carlo (Poisson + Binomial)
-├── motor_metricas.py        # Pandas engine: riesgo de gol, momentum
-├── predictor_previo.py      # Predicciones pre-partido (H2H + MC)
-├── selector_visual.py       # Selector curses con categorías
-├── extractor_365scores.py   # API 365Scores
-├── extractor_sofascore.py   # API Sofascore
-├── extractor_flashscore.py  # Playwright scraping
-├── extractor_google.py      # Google scraping (fallback)
-├── extractor_vivo.py        # Extractor genérico en vivo
-├── extractor_api.py         # football-data.org wrapper
-├── football_data_client.py  # REST client para football-data.org
-├── buscar_partidos.py       # Utilidad de búsqueda
-├── test_integracion.py      # Tests de integración
-├── test_extractor.py        # Tests de extractores
-├── test_motor.py            # Tests del motor de métricas
-├── test_motor2.py           # Tests adicionales del motor
-├── test_simulador.py        # Tests del simulador Monte Carlo
-├── requirements.txt         # Dependencias Python
-└── LICENSE                  # MIT License
+Una consulta recibida hace más de 60 segundos suspende el pronóstico servido por la web; el navegador también lo retira si pierde la conexión. La edad mide la recepción local, no una garantía de actualización interna del proveedor. La cobertura cuenta estadísticas disponibles y no es una medida de acierto. Un cambio de marcador o de minuto invalida el pronóstico anterior mientras se recalcula.
+
+Los pronósticos reales se guardan automáticamente en `data/predicciones_vivo.sqlite3`, excluido de Git. Para observar el resultado final, el análisis debe permanecer abierto hasta que el proveedor confirme la finalización; detenerlo antes deja el partido pendiente. No se recogen resultados en segundo plano después de cerrar la aplicación.
+
+```powershell
+.venv/Scripts/python.exe registro_vivo.py --minuto 60
 ```
 
-## 📄 Licencia
+Esta evaluación toma una predicción por partido en los cinco minutos previos al corte y sólo resultados finales observados después. Reporta cantidad de partidos, acierto 1X2, Brier y log loss frente a un comparador uniforme. Una muestra pequeña o seleccionada no demuestra precisión general. Las 35 pruebas comprueban software y coherencia, no el porcentaje de acierto deportivo.
 
-Este proyecto está bajo la licencia [MIT](LICENSE).
+Fundamentos: [xG y calidad de tiro, Hudl Statsbomb](https://statsbomb.com/soccer-metrics/expected-goals-xg-explained/) y [evaluación de probabilidades, scikit-learn](https://scikit-learn.org/stable/modules/calibration.html).
+
+## Capturas de la versión original
+
+Las capturas son históricas; las etiquetas y metodología han cambiado después de la revisión.
+
+![Dashboard original](docs/screenshots/dashboard_montecarlo.jpg)
+
+## Licencia
+
+MIT. Ver LICENSE.

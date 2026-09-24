@@ -26,4 +26,5 @@ async def run():
         print("Data:")
         print(motor_metricas._motor.df_buffer)
 
-asyncio.run(run())
+if __name__ == "__main__":
+    asyncio.run(run())

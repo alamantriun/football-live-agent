@@ -38,6 +38,8 @@ import simulador
 import dashboard_web
 import selector_visual
 import predictor_previo
+import registro_vivo
+import aprendizaje
 
 logging.basicConfig(format="[%(asctime)s] [%(name)s] %(message)s")
 logger = logging.getLogger("main_agente")
@@ -53,6 +55,7 @@ historial_mc: list = []
 cuarto_actual: int = 1
 nombre_partido: str = "Local vs Visitante"
 modo_extraccion: str = "365scores"
+prior_partido: dict = {}
 SESSION_ID: str = uuid.uuid4().hex[:8]
 
 console = Console()
@@ -60,6 +63,20 @@ console = Console()
 DASHBOARD_REFRESH = 1.5  # segundos entre actualizaciones del dashboard
 PARTIDOS_FILE = "partidos.json"
 WEB_PORT = int(os.getenv("WEB_PORT", "8765"))
+
+
+def reiniciar_estado() -> None:
+    """Limpia el análisis actual antes de seleccionar otro partido."""
+    global raw_queue, metrics_queue, buffer_q1, ultimo_metrics
+    global prediccion_actual, historial_mc, cuarto_actual, prior_partido
+    raw_queue = asyncio.Queue(maxsize=100)
+    metrics_queue = asyncio.Queue(maxsize=100)
+    buffer_q1 = []
+    ultimo_metrics = {}
+    prediccion_actual = {}
+    historial_mc = []
+    cuarto_actual = 1
+    prior_partido = {}
 
 
 def _obtener_estado_web() -> dict:
@@ -82,7 +99,7 @@ def _obtener_estado_web() -> dict:
 
 def _sync_web() -> None:
     """Publica el mismo estado que ve la terminal al dashboard web."""
-    dashboard_web.publicar_estado(_obtener_estado_web())
+    dashboard_web.notificar_estado_actual()
 
 
 def _sparkline_text(vals: list[float], width: int = 24) -> str:
@@ -222,12 +239,12 @@ def generar_dashboard() -> Layout:
     sl_at_l = _sparkline_valores("ataques_peligrosos", "local")
 
     spark_table.add_row(
-        "[yellow]Riesgo Local[/yellow]",
+        "[yellow]Presión Local (0–100)[/yellow]",
         f"[bold red]{_sparkline_text_riesgo(sl_rl)}[/bold red]",
         f"{sl_rl[-1]:.0f}%",
     )
     spark_table.add_row(
-        "[yellow]Riesgo Visit.[/yellow]",
+        "[yellow]Presión Visit. (0–100)[/yellow]",
         f"[bold red]{_sparkline_text_riesgo(sl_rv)}[/bold red]",
         f"{sl_rv[-1]:.0f}%",
     )
@@ -269,8 +286,9 @@ def generar_dashboard() -> Layout:
     rgl_style = "bold red" if rgl > 80 else "green"
     rgv_style = "bold red" if rgv > 80 else "green"
 
-    pl_style = "bold cyan" if pos_l > pos_v else "white"
-    pv_style = "bold cyan" if pos_v > pos_l else "white"
+    comparables = isinstance(pos_l, (int, float)) and isinstance(pos_v, (int, float))
+    pl_style = "bold cyan" if comparables and pos_l > pos_v else "white"
+    pv_style = "bold cyan" if comparables and pos_v > pos_l else "white"
     
     al_style = "bold green" if al > 55 else "dim" if al < 45 else "white"
     av_style = "bold green" if av > 55 else "dim" if av < 45 else "white"
@@ -305,8 +323,8 @@ def generar_dashboard() -> Layout:
     met_table.add_row("[yellow]T. Amarillas[/yellow]", f"{t_a_l} - {t_a_v}")
     met_table.add_row("[red]T. Rojas[/red]", f"{t_r_l} - {t_r_v}")
     met_table.add_row("[white]Faltas[/white]", f"{f_l} - {f_v}")
-    met_table.add_row("[yellow]Riesgo Gol Local[/yellow]", f"[{rgl_style}]{rgl:.1f}%[/{rgl_style}]")
-    met_table.add_row("[yellow]Riesgo Gol Visitante[/yellow]", f"[{rgv_style}]{rgv:.1f}%[/{rgv_style}]")
+    met_table.add_row("[yellow]Presión Local[/yellow]", f"[{rgl_style}]{rgl:.1f}%[/{rgl_style}]")
+    met_table.add_row("[yellow]Presión Visitante[/yellow]", f"[{rgv_style}]{rgv:.1f}%[/{rgv_style}]")
     met_table.add_row("[magenta]Ánimo Local[/magenta]", f"[{al_style}]{al:.1f}%[/{al_style}]")
     met_table.add_row("[magenta]Ánimo Visitante[/magenta]", f"[{av_style}]{av:.1f}%[/{av_style}]")
 
@@ -324,11 +342,11 @@ def generar_dashboard() -> Layout:
         pred_table.add_row("Victoria Local", f"{prediccion_actual.get('prob_1x2_local', 0):.1f}%")
         pred_table.add_row("Empate", f"{prediccion_actual.get('prob_1x2_empate', 0):.1f}%")
         pred_table.add_row("Victoria Visitante", f"{prediccion_actual.get('prob_1x2_visitante', 0):.1f}%")
-        pred_table.add_row("Próx. gol Local", f"{prediccion_actual.get('prob_prox_gol_local', 0):.1f}%")
-        pred_table.add_row("Próx. gol Visit.", f"{prediccion_actual.get('prob_prox_gol_visitante', 0):.1f}%")
+        pred_table.add_row("Anota Local (resto)", f"{prediccion_actual.get('prob_prox_gol_local', 0):.1f}%")
+        pred_table.add_row("Anota Visit. (resto)", f"{prediccion_actual.get('prob_prox_gol_visitante', 0):.1f}%")
         pred_table.add_row("Marcador Final", prediccion_actual.get("marcador_mas_probable", "-"))
         ic = prediccion_actual.get("ic95_goles_totales", {})
-        pred_table.add_row("IC95 Goles", f"{ic.get('min', 0)} - {ic.get('max', 0)}")
+        pred_table.add_row("Intervalo predictivo 95% Goles", f"{ic.get('min', 0)} - {ic.get('max', 0)}")
         pred_table.add_row("Over 1.5", f"{prediccion_actual.get('prob_over_1_5', 0):.1f}%")
         pred_table.add_row("Over 2.5", f"{prediccion_actual.get('prob_over_2_5', 0):.1f}%")
         pred_table.add_row("Over 3.5", f"{prediccion_actual.get('prob_over_3_5', 0):.1f}%")
@@ -345,7 +363,7 @@ def generar_dashboard() -> Layout:
             f"{prediccion_actual.get('goles_esperados_visitante', 0):.1f}",
         )
         pred_table.add_row(
-            "Tasa ataques L/V",
+            "Tasa goles/min L/V",
             f"{prediccion_actual.get('tasa_ataques_local', 0):.2f} / "
             f"{prediccion_actual.get('tasa_ataques_visitante', 0):.2f}",
         )
@@ -353,7 +371,7 @@ def generar_dashboard() -> Layout:
         pred_table.add_row("Estado", "[dim]Recalibrando simulador en vivo...[/dim]")
 
     layout["prediccion"].update(
-        Panel(pred_table, title="[bold magenta]PREDICCIÓN FINAL (Ligera)[/bold magenta]",
+        Panel(pred_table, title="[bold magenta]PREDICCIÓN EXPERIMENTAL[/bold magenta]",
               border_style="magenta")
     )
 
@@ -371,34 +389,34 @@ def generar_dashboard() -> Layout:
 
         sugerencias = 0
         if p_gol_l > 65:
-            apuestas_table.add_row("🔥 [bold green]Próximo gol: LOCAL[/bold green]")
+            apuestas_table.add_row("🔥 [bold green]Local anota en el resto[/bold green]")
             sugerencias += 1
             
         if p_gol_v > 65:
-            apuestas_table.add_row("🔥 [bold green]Próximo gol: VISITANTE[/bold green]")
+            apuestas_table.add_row("🔥 [bold green]Visitante anota en el resto[/bold green]")
             sugerencias += 1
             
         if p_over_25 > 75:
-            apuestas_table.add_row("📈 [yellow]Más de 2.5 Goles en total (Valor Alto)[/yellow]")
+            apuestas_table.add_row("📈 [yellow]Más de 2.5 Goles en total (probabilidad del modelo)[/yellow]")
             sugerencias += 1
         elif p_over_35 > 60:
-            apuestas_table.add_row("🚀 [bold yellow]Más de 3.5 Goles en total (Riesgo/Recompensa)[/bold yellow]")
+            apuestas_table.add_row("🚀 [bold yellow]Más de 3.5 Goles en total (probabilidad del modelo)[/bold yellow]")
             sugerencias += 1
 
         if p_empate > 50:
-            apuestas_table.add_row("🛡️ [cyan]Terminará en EMPATE (Posible Cobertura)[/cyan]")
+            apuestas_table.add_row("🛡️ [cyan]Empate: escenario probable[/cyan]")
             sugerencias += 1
 
         if sugerencias == 0:
-            apuestas_table.add_row("[dim]Las cuotas en vivo están ajustadas. Evitar apostar ahora.[/dim]")
+            apuestas_table.add_row("[dim]Sin escenario dominante; modelo sin calibración en vivo.[/dim]")
     else:
         apuestas_table.add_row("[dim]Generando proyecciones avanzadas...[/dim]")
         
     # Sugerencias extremas en vivo (sin esperar al simulador)
     if rgl > 80:
-        apuestas_table.add_row("⚡ [bold red]EN VIVO: Gol inminente LOCAL[/bold red]")
+        apuestas_table.add_row("⚡ [bold red]EN VIVO: Presión alta (índice) LOCAL[/bold red]")
     if rgv > 80:
-        apuestas_table.add_row("⚡ [bold red]EN VIVO: Gol inminente VISITANTE[/bold red]")
+        apuestas_table.add_row("⚡ [bold red]EN VIVO: Presión alta (índice) VISITANTE[/bold red]")
 
     # Sugerencias específicas de jugadores
     jugadores_tips = ultimo_metrics.get("_jugadores", [])
@@ -437,7 +455,7 @@ def generar_dashboard() -> Layout:
             apuestas_table.add_row(f"  Visit.: {nombres}...")
 
     layout["apuestas"].update(
-        Panel(apuestas_table, title="[bold yellow]💰 APUESTAS Y JUGADORES[/bold yellow]",
+        Panel(apuestas_table, title="[bold yellow]ESCENARIOS EXPERIMENTALES Y JUGADORES[/bold yellow]",
               border_style="yellow")
     )
 
@@ -512,26 +530,45 @@ async def tarea_simulador() -> None:
         
         # No simular si estamos explícitamente en el receso
         estado_texto = ultimo_metrics.get("_status", "").lower()
-        if estado_texto in ("half time", "halftime", "ht", "paused") or "descanso" in estado_texto or "medio tiempo" in estado_texto:
+        finalizado = estado_texto in ("ft", "finished", "ended", "finalizado", "full time")
+        duracion = float(os.getenv("MATCH_DURATION", "90"))
+        if minuto >= duracion and not finalizado:
+            # No convertir un horizonte desconocido de descuento en certeza.
+            prediccion_actual = {}
             _sync_web()
             continue
+        if estado_texto in ("half time", "halftime", "ht", "paused") or "descanso" in estado_texto or "medio tiempo" in estado_texto:
+            minuto = 45.0
 
         if len(buffer_q1) >= simulador.MIN_EVENTOS_REQUERIDOS:
             try:
                 eventos_recientes = buffer_q1[-20:]
+                evento_calculo = dict(ultimo_metrics)
                 # 2. Desplazar el cálculo pesado a otro hilo (no congela la terminal)
                 prediccion_actual = await asyncio.to_thread(
-                    simulador.correr, eventos_recientes, minuto, marcador
+                    simulador.correr, eventos_recientes, minuto, marcador,
+                    duracion=minuto if finalizado else duracion,
+                    prior_local=prior_partido.get("local", 1.5),
+                    prior_visitante=prior_partido.get("visitante", 1.2),
+                    ajuste=aprendizaje.modelo_activo(),
                 )
-                historial_mc.append({
+                prediccion_actual["fuente_prior"] = prior_partido.get("fuente", "Media general sin historial de equipos")
+                prediccion_actual["soporte_prior"] = prior_partido.get("soporte", {})
+                try:
+                    await asyncio.to_thread(registro_vivo.registrar, evento_calculo, dict(prediccion_actual), finalizado)
+                except Exception:
+                    logger.exception("No se pudo guardar el pronóstico para evaluación")
+                observacion = {
                     "minuto": minuto,
                     "prob_1x2_local": prediccion_actual.get("prob_1x2_local", 0),
                     "prob_1x2_empate": prediccion_actual.get("prob_1x2_empate", 0),
                     "prob_1x2_visitante": prediccion_actual.get("prob_1x2_visitante", 0),
                     "marcador_mas_probable": prediccion_actual.get("marcador_mas_probable", "—"),
                     "prob_over_2_5": prediccion_actual.get("prob_over_2_5", 0),
-                })
-                if len(historial_mc) > 60:
+                }
+                if not historial_mc or historial_mc[-1] != observacion:
+                    historial_mc.append(observacion)
+                if len(historial_mc) > 600:
                     historial_mc.pop(0)
                 _sync_web()
             except ValueError:
@@ -552,18 +589,18 @@ async def tarea_dashboard() -> None:
 
             if rgl > 80:
                 console.print(
-                    f"[bold red]⚠️  ALERTA: RIESGO DE GOL CRÍTICO — LOCAL [{rgl:.1f}%][/bold red]"
+                    f"[bold red]⚠️  ALERTA: PRESIÓN ALTA (ÍNDICE) — LOCAL [{rgl:.1f}%][/bold red]"
                 )
             if rgv > 80:
                 console.print(
-                    f"[bold red]⚠️  ALERTA: RIESGO DE GOL CRÍTICO — VISITANTE [{rgv:.1f}%][/bold red]"
+                    f"[bold red]⚠️  ALERTA: PRESIÓN ALTA (ÍNDICE) — VISITANTE [{rgv:.1f}%][/bold red]"
                 )
 
             live.update(generar_dashboard())
             _sync_web()
 
 
-async def loop_principal() -> None:
+async def loop_principal(mostrar_terminal: bool = True) -> None:
     """Loop principal — datos en vivo vía 365Scores."""
     extractores = {
         "365scores": extractor_365scores.iniciar_con_reconexion,
@@ -579,22 +616,22 @@ async def loop_principal() -> None:
             ))
             tareas.append(asyncio.create_task(motor_metricas.iniciar(raw_queue, metrics_queue), name="motor"))
             tareas.append(asyncio.create_task(tarea_recolector_metricas(), name="recolector"))
-            tareas.append(asyncio.create_task(tarea_dashboard(), name="dashboard"))
+            if mostrar_terminal:
+                tareas.append(asyncio.create_task(tarea_dashboard(), name="dashboard"))
             tareas.append(asyncio.create_task(tarea_simulador(), name="simulador"))
 
-            resultados = await asyncio.gather(*tareas, return_exceptions=True)
-            for r in resultados:
-                if isinstance(r, Exception) and not isinstance(r, asyncio.CancelledError):
-                    logger.error("Tarea terminó con error: %s", r)
+            await asyncio.gather(*tareas)
         except asyncio.CancelledError:
             logger.info("[SISTEMA] Detenido por el usuario.")
             for t in tareas:
                 t.cancel()
-            break
+            await asyncio.gather(*tareas, return_exceptions=True)
+            raise
         except Exception as e:
             logger.error("Error inesperado: %s — reconectando en 3s", e)
             for t in tareas:
                 t.cancel()
+            await asyncio.gather(*tareas, return_exceptions=True)
             await asyncio.sleep(3)
 
 

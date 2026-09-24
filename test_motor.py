@@ -27,4 +27,5 @@ async def run():
     if not mq.empty():
         print("Success, got message")
 
-asyncio.run(run())
+if __name__ == "__main__":
+    asyncio.run(run())

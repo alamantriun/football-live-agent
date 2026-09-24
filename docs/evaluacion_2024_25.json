@@ -1,0 +1,67 @@
+{
+  "n": 380,
+  "desde": "2024-08-01",
+  "metricas": {
+    "modelo": {
+      "log_loss": 1.0041960065808908,
+      "brier": 0.6001952316240416,
+      "acierto_1x2": 0.5131578947368421
+    },
+    "frecuencias": {
+      "log_loss": 1.082313595394208,
+      "brier": 0.6563440697456397,
+      "acierto_1x2": 0.40789473684210525
+    },
+    "poisson_liga": {
+      "log_loss": 1.0798789734849699,
+      "brier": 0.654813337315755,
+      "acierto_1x2": 0.40789473684210525
+    }
+  },
+  "acierto_marcador_exacto": 0.12894736842105264,
+  "cobertura_intervalo_condicional_95": 0.9894736842105263,
+  "calibracion_favorito": [
+    {
+      "desde": 0.3,
+      "n": 39,
+      "prob_media": 0.39022108214426854,
+      "frecuencia": 0.358974358974359
+    },
+    {
+      "desde": 0.4,
+      "n": 162,
+      "prob_media": 0.44694314412092195,
+      "frecuencia": 0.4444444444444444
+    },
+    {
+      "desde": 0.5,
+      "n": 92,
+      "prob_media": 0.5488778436977427,
+      "frecuencia": 0.5543478260869565
+    },
+    {
+      "desde": 0.6,
+      "n": 71,
+      "prob_media": 0.6423823849803225,
+      "frecuencia": 0.647887323943662
+    },
+    {
+      "desde": 0.7,
+      "n": 14,
+      "prob_media": 0.7368107078005953,
+      "frecuencia": 0.7857142857142857
+    },
+    {
+      "desde": 0.8,
+      "n": 2,
+      "prob_media": 0.813812943429109,
+      "frecuencia": 0.5
+    }
+  ],
+  "delta_log_loss_vs_frecuencias": -0.07811758881331697,
+  "nota": "Evaluaci�n prepartido retrospectiva; no valida el modelo en vivo. Menor log_loss y Brier es mejor. Sin selecci�n de hiperpar�metros sobre estos resultados.",
+  "fuentes_sha256": {
+    "data\\E0-2324.csv": "f64a0999d037a8d1bcd0346f5d7532bbc3d2ec3434f9a46591713ea23c47aa15",
+    "data\\E0-2425.csv": "386369240ce88153da2ba231c6f356003eca395845b754e216b46bed62f69076"
+  }
+}

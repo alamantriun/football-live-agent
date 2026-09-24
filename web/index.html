@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#07110d">
+  <title>Football Live Agent</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#" aria-label="Football Live Agent, inicio">
+      <span class="brand-ball">F<span class="brand-plus">+</span></span>
+      <span><strong>Football</strong><small>Live Agent</small></span>
+    </a>
+    <div class="connection" id="connection"><i></i><span>Conectando…</span></div>
+  </header>
+
+  <main>
+    <section id="selectorView" class="view selector-view">
+      <div class="hero">
+        <p class="eyebrow">Tu observatorio de fútbol</p>
+        <h1>El partido cambia.<br><span>Tu lectura también.</span></h1>
+        <p class="hero-copy">Del primer remate al último minuto. Sigue el juego, compara escenarios y descubre cómo cambia el pronóstico.</p>
+        <div class="pitch-art" aria-hidden="true"><div class="pitch-center"></div><div class="pitch-box left"></div><div class="pitch-box right"></div><i class="player p1"></i><i class="player p2"></i><i class="player p3"></i><i class="player p4"></i><i class="player p5"></i><i class="player p6"></i><span class="pitch-label">EL JUEGO, EN CONTEXTO</span></div>
+        <div class="hero-facts"><span><b>01</b> Observa</span><span><b>02</b> Compara</span><span><b>03</b> Interpreta</span></div>
+        <div class="model-note"><span>β</span><p><strong>Modelo experimental</strong>Las probabilidades expresan incertidumbre; no garantizan el resultado.</p></div>
+      </div>
+
+      <div class="selector-panel">
+        <div class="panel-heading">
+          <div><p class="eyebrow">Centro de partidos</p><h2>Selecciona para analizar</h2></div>
+          <button id="refreshMatches" class="icon-btn" type="button" aria-label="Actualizar partidos">↻</button>
+        </div>
+        <div class="tabs" role="tablist" aria-label="Categorías de partidos">
+          <button class="tab active" data-category="en_vivo" role="tab">En vivo</button>
+          <button class="tab" data-category="hoy" role="tab">Hoy</button>
+          <button class="tab" data-category="proximos" role="tab">Próximos</button>
+          <button class="tab" data-category="guardados" role="tab">Guardados</button>
+        </div>
+        <label class="search"><span>⌕</span><input id="matchSearch" type="search" aria-label="Buscar equipo o competición" placeholder="Buscar equipo o competición" autocomplete="off"></label>
+        <label class="league-filter">Competición<select id="leagueFilter"><option value="">Todas las competiciones</option></select></label>
+        <div id="matchMessage" class="message" role="status"></div>
+        <div id="matches" class="matches" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <section id="dashboardView" class="view dashboard-view hidden">
+      <nav class="dashboard-nav">
+        <button id="backToMatches" class="ghost-btn" type="button">← Cambiar partido</button>
+        <div class="nav-actions"><button id="exportAnalysis" class="ghost-btn" type="button">↓ Exportar análisis</button><button id="stopAnalysis" class="danger-btn" type="button">Detener análisis</button></div>
+      </nav>
+
+      <div id="analysisAlert" class="analysis-alert hidden" role="alert"></div>
+      <div class="match-context"><span id="competitionName">CENTRO DE ANÁLISIS</span><span id="freshness">Esperando datos</span></div>
+
+      <section class="score-hero">
+        <div class="team home"><span class="team-mark">L</span><h2 id="homeName">Local</h2></div>
+        <div class="score-center">
+          <div id="phaseBadge" class="phase-badge">Cargando</div>
+          <div id="score" class="big-score">0 <span>:</span> 0</div>
+          <div id="matchClock" class="match-clock">—</div>
+        </div>
+        <div class="team away"><span class="team-mark">V</span><h2 id="awayName">Visitante</h2></div>
+      </section>
+
+      <section class="metric-strip" id="metricStrip"></section>
+      <section class="insight-banner"><span class="insight-icon">↗</span><div><p class="eyebrow">Lectura del partido</p><p id="liveInsight">Conectando las piezas del partido…</p></div><div id="coverage" class="coverage"></div></section>
+
+      <div class="dashboard-grid">
+        <article class="surface span-2">
+          <div class="surface-head"><div><p class="eyebrow">Pronóstico 1X2</p><h3>Probabilidades del resultado</h3></div><span class="method-chip" id="methodChip">Experimental</span></div>
+          <div id="outcomeBars" class="probability-bars"></div>
+        </article>
+
+        <article class="surface">
+          <div class="surface-head"><div><p class="eyebrow">Resultado modal</p><h3>Marcador más probable</h3></div></div>
+          <div id="modalScore" class="modal-score">—</div>
+          <div id="goalExpectancy" class="goal-expectancy"></div>
+          <div id="scoreAlternatives" class="score-alternatives"></div>
+        </article>
+
+        <article class="surface"><div class="surface-head"><div><p class="eyebrow">La siguiente jugada</p><h3>¿Quién marca después?</h3></div><span class="live-dot"></span></div><div id="nextGoal" class="compact-bars"></div><div id="tenMinute" class="ten-minute"></div></article>
+        <article class="surface span-2"><div class="surface-head"><div><p class="eyebrow">Así cambia el pronóstico</p><h3>La historia de las probabilidades</h3></div><span class="muted">1X2 · %</span></div><canvas id="probabilityChart" class="chart" role="img" aria-label="Evolución de probabilidades local, empate y visitante"></canvas><div class="chart-legend"><span class="home-dot">Local</span><span class="draw-dot">Empate</span><span class="away-dot">Visitante</span></div></article>
+        <article class="surface span-2"><div class="surface-head"><div><p class="eyebrow">Cara a cara</p><h3>Radiografía del partido</h3></div><span class="muted">— = sin dato</span></div><div id="teamStats" class="team-stats"></div></article>
+        <article class="surface"><div class="surface-head"><div><p class="eyebrow">Detrás del pronóstico</p><h3>Datos y contexto</h3></div></div><div id="evidence" class="evidence"></div></article>
+
+        <article class="surface">
+          <div class="surface-head"><div><p class="eyebrow">Mercados de goles</p><h3>Totales y ambos marcan</h3></div></div>
+          <div id="markets" class="compact-bars"></div>
+        </article>
+
+        <article class="surface span-2">
+          <div class="surface-head"><div><p class="eyebrow">Evolución</p><h3>Presión y momentum</h3></div><span class="muted">Índices 0–100</span></div>
+          <canvas id="trendChart" class="chart" aria-label="Evolución de presión y momentum"></canvas>
+          <div class="chart-legend"><span class="home-dot">Local presión</span><span class="away-dot">Visitante presión</span><span class="accent-dot">Momentum local</span></div>
+        </article>
+
+        <article class="surface">
+          <div class="surface-head"><div><p class="eyebrow">Distribución</p><h3>Goles totales</h3></div></div>
+          <canvas id="goalsChart" class="chart small" aria-label="Distribución de goles totales"></canvas>
+        </article>
+
+        <article class="surface span-2">
+          <div class="surface-head"><div><p class="eyebrow">Matriz de resultados</p><h3>Probabilidad por marcador</h3></div><span class="muted" id="matrixLimit">Última celda = 6+</span></div>
+          <div id="heatmap" class="heatmap-wrap"></div>
+        </article>
+
+        <article class="surface timeline-card">
+          <div class="surface-head"><div><p class="eyebrow">Partido</p><h3>Cronología reciente</h3></div></div>
+          <div id="timeline" class="timeline"></div>
+        </article>
+      </div>
+
+      <section class="methodology">
+        <strong>Cómo leer este análisis</strong>
+        <p id="methodologyText">El modelo es experimental. La presión es un índice descriptivo y los goles esperados provienen de tasas agregadas.</p>
+      </section>
+    </section>
+  </main>
+  <script src="/app.js" defer></script>
+</body>
+</html>
