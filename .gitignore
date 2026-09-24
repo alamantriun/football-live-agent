@@ -2,6 +2,11 @@
 api_key.txt
 *.env
 .env*
+!.env.example
+.env.local
+.vercel/
+.supabase/
+supabase/.temp/
 
 # Python
 .venv/
@@ -14,6 +19,10 @@ pytest-cache-files-*/
 .eggs/
 dist/
 build/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
 
 # Datos generados en runtime
 work/
