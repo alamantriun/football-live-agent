@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(39);
+select plan(45);
 
 select has_table('private', 'fixtures', 'fixtures exists');
 select has_table('private', 'predictions', 'predictions exists');
@@ -62,6 +62,12 @@ select
   set_config('test.old_run_id', id::text, true),
   set_config('test.old_request_id', request_id::text, true)
 from private.claim_job('collect', 'fence-test', 30);
+
+select is(
+  (select count(*) from private.claim_job('collect', 'fence-test', 30)),
+  0::bigint,
+  'an active lease cannot be stolen'
+);
 
 update private.job_runs
 set lease_until = now() - interval '1 second'
@@ -212,6 +218,30 @@ values
   ('10000000-0000-0000-0000-000000000002', 'candidate-invalid', 'candidate', '{}', 'hash-invalid', 'test-code', 70, 30, 0.30, 0.70, null),
   ('10000000-0000-0000-0000-000000000003', 'candidate-valid', 'candidate', '{}', 'hash-valid', 'test-code', 70, 30, 0.30, 0.70, null),
   ('10000000-0000-0000-0000-000000000004', 'candidate-duplicate', 'candidate', '{}', 'hash-duplicate', 'test-code', 70, 30, 0.30, 0.70, null);
+
+select throws_ok(
+  $$
+    insert into private.predictions (
+      fixture_id, snapshot_id, model_version_id, lambda_base,
+      lambda_adjusted, probabilities, explanation, quality
+    )
+    select
+      (select id from private.fixtures where provider_fixture_id = 'test-train-001'),
+      snapshots.id,
+      '10000000-0000-0000-0000-000000000001',
+      '{}'::jsonb,
+      '{}'::jsonb,
+      '{}'::jsonb,
+      '{}'::jsonb,
+      'fresh'
+    from private.live_snapshots as snapshots
+    join private.fixtures as fixtures on fixtures.id = snapshots.fixture_id
+    where fixtures.provider_fixture_id = 'test-valid-001'
+  $$,
+  '23503',
+  null,
+  'a prediction cannot reference a snapshot from another fixture'
+);
 
 insert into private.training_runs (
   id, train_fixture_ids, validation_fixture_ids,
@@ -387,8 +417,68 @@ select throws_ok(
 update private.model_versions
 set brier = 0.30
 where id = '10000000-0000-0000-0000-000000000002';
+
+update private.model_versions
+set brier = 0.40,
+    log_loss = 0.70
+where id = '10000000-0000-0000-0000-000000000002';
 update private.training_runs
-set decision = 'failed'
+set metrics = jsonb_build_object('brier', 0.40, 'log_loss', 0.70)
+where id = '20000000-0000-0000-0000-000000000002';
+select throws_ok(
+  $$select private.promote_model('10000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001')$$,
+  '22023',
+  null,
+  'promotion rejects equal Brier when log loss improves'
+);
+
+update private.model_versions
+set brier = 0.41
+where id = '10000000-0000-0000-0000-000000000002';
+update private.training_runs
+set metrics = jsonb_build_object('brier', 0.41, 'log_loss', 0.70)
+where id = '20000000-0000-0000-0000-000000000002';
+select throws_ok(
+  $$select private.promote_model('10000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001')$$,
+  '22023',
+  null,
+  'promotion rejects worse Brier when log loss improves'
+);
+
+update private.model_versions
+set brier = 0.30,
+    log_loss = 0.80
+where id = '10000000-0000-0000-0000-000000000002';
+update private.training_runs
+set metrics = jsonb_build_object('brier', 0.30, 'log_loss', 0.80)
+where id = '20000000-0000-0000-0000-000000000002';
+select throws_ok(
+  $$select private.promote_model('10000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001')$$,
+  '22023',
+  null,
+  'promotion rejects equal log loss when Brier improves'
+);
+
+update private.model_versions
+set log_loss = 0.81
+where id = '10000000-0000-0000-0000-000000000002';
+update private.training_runs
+set metrics = jsonb_build_object('brier', 0.30, 'log_loss', 0.81)
+where id = '20000000-0000-0000-0000-000000000002';
+select throws_ok(
+  $$select private.promote_model('10000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001')$$,
+  '22023',
+  null,
+  'promotion rejects worse log loss when Brier improves'
+);
+
+update private.model_versions
+set brier = 0.30,
+    log_loss = 0.70
+where id = '10000000-0000-0000-0000-000000000002';
+update private.training_runs
+set metrics = jsonb_build_object('brier', 0.30, 'log_loss', 0.70),
+    decision = 'failed'
 where id = '20000000-0000-0000-0000-000000000002';
 select throws_ok(
   $$select private.promote_model('10000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001')$$,
