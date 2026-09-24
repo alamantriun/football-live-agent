@@ -140,7 +140,7 @@ create index predictions_fixture_created_at_idx
   on private.predictions (fixture_id, created_at desc);
 create index predictions_model_version_id_idx
   on private.predictions (model_version_id);
-create index training_runs_candidate_model_id_idx
+create unique index training_runs_candidate_model_id_unique
   on private.training_runs (candidate_model_id)
   where candidate_model_id is not null;
 create index training_runs_finished_at_idx
@@ -274,6 +274,7 @@ $$;
 
 create function private.finish_job(
   p_run_id uuid,
+  p_request_id uuid,
   p_state text,
   p_counters jsonb default '{}'::jsonb,
   p_sanitized_error text default null
@@ -306,12 +307,13 @@ begin
       lease_until = now(),
       finished_at = now()
   where id = p_run_id
+    and request_id = p_request_id
     and state = 'running'
     and lease_until >= now()
   returning * into v_run;
 
   if not found then
-    raise exception 'running job lease not found or expired'
+    raise exception 'running job lease not found, fenced, or expired'
       using errcode = 'P0002';
   end if;
 
@@ -331,9 +333,17 @@ as $$
 declare
   v_candidate private.model_versions%rowtype;
   v_current private.model_versions%rowtype;
+  v_run private.training_runs%rowtype;
   v_active_id uuid;
-  v_last_finished_at timestamptz;
-  v_last_decision text;
+  v_train_count integer;
+  v_validation_count integer;
+  v_train_evidence_count integer;
+  v_validation_evidence_count integer;
+  v_validation_snapshot_count integer;
+  v_train_max_confirmed_at timestamptz;
+  v_validation_min_observed_at timestamptz;
+  v_run_brier double precision;
+  v_run_log_loss double precision;
 begin
   if current_user <> 'service_role' then
     raise exception 'service_role is required'
@@ -385,25 +395,139 @@ begin
       using errcode = '22023';
   end if;
 
-  if v_candidate.train_size < 70 or v_candidate.validation_size < 30 then
-    raise exception 'candidate requires at least 70 train and 30 validation fixtures'
+  select * into v_run
+  from private.training_runs
+  where candidate_model_id = p_candidate_id
+  for update;
+
+  if not found then
+    raise exception 'candidate must be bound to exactly one training run'
       using errcode = '22023';
   end if;
+
+  if v_run.decision <> 'running' or v_run.finished_at is not null then
+    raise exception 'training run is not eligible for promotion'
+      using errcode = '22023';
+  end if;
+
+  v_train_count := cardinality(v_run.train_fixture_ids);
+  v_validation_count := cardinality(v_run.validation_fixture_ids);
+
+  if v_train_count < 70 or v_validation_count < 30 then
+    raise exception 'training evidence requires at least 70 train and 30 validation fixtures'
+      using errcode = '22023';
+  end if;
+
+  if exists (
+       select 1 from unnest(v_run.train_fixture_ids) as ids(fixture_id)
+       where fixture_id is null
+     )
+     or exists (
+       select 1 from unnest(v_run.validation_fixture_ids) as ids(fixture_id)
+       where fixture_id is null
+     ) then
+    raise exception 'training evidence cannot contain null fixture IDs'
+      using errcode = '22023';
+  end if;
+
+  if (select count(distinct fixture_id) from unnest(v_run.train_fixture_ids) as ids(fixture_id)) <> v_train_count
+     or (select count(distinct fixture_id) from unnest(v_run.validation_fixture_ids) as ids(fixture_id)) <> v_validation_count then
+    raise exception 'training evidence cannot contain duplicate fixture IDs'
+      using errcode = '22023';
+  end if;
+
+  if exists (
+    select 1
+    from unnest(v_run.train_fixture_ids) as train_ids(fixture_id)
+    join unnest(v_run.validation_fixture_ids) as validation_ids(fixture_id)
+      using (fixture_id)
+  ) then
+    raise exception 'training and validation fixtures cannot overlap'
+      using errcode = '22023';
+  end if;
+
+  if v_candidate.train_size <> v_train_count
+     or v_candidate.validation_size <> v_validation_count then
+    raise exception 'candidate sample counts must match its training run'
+      using errcode = '22023';
+  end if;
+
+  select count(*) into v_train_evidence_count
+  from unnest(v_run.train_fixture_ids) as ids(fixture_id)
+  join private.fixtures as fixtures on fixtures.id = ids.fixture_id
+  join private.outcomes as outcomes
+    on outcomes.fixture_id = ids.fixture_id
+   and outcomes.confirmed;
+
+  select count(*) into v_validation_evidence_count
+  from unnest(v_run.validation_fixture_ids) as ids(fixture_id)
+  join private.fixtures as fixtures on fixtures.id = ids.fixture_id
+  join private.outcomes as outcomes
+    on outcomes.fixture_id = ids.fixture_id
+   and outcomes.confirmed;
+
+  if v_train_evidence_count <> v_train_count
+     or v_validation_evidence_count <> v_validation_count then
+    raise exception 'every train and validation fixture requires a confirmed outcome'
+      using errcode = '22023';
+  end if;
+
+  select max(outcomes.confirmed_at)
+  into v_train_max_confirmed_at
+  from private.outcomes as outcomes
+  where outcomes.fixture_id = any(v_run.train_fixture_ids)
+    and outcomes.confirmed;
+
+  select count(distinct snapshots.fixture_id), min(snapshots.provider_observed_at)
+  into v_validation_snapshot_count, v_validation_min_observed_at
+  from private.live_snapshots as snapshots
+  where snapshots.fixture_id = any(v_run.validation_fixture_ids);
+
+  if v_validation_snapshot_count <> v_validation_count
+     or v_validation_min_observed_at is null then
+    raise exception 'every validation fixture requires provider observation evidence'
+      using errcode = '22023';
+  end if;
+
+  if v_train_max_confirmed_at is null
+     or v_train_max_confirmed_at >= v_validation_min_observed_at then
+    raise exception 'validation observations must be later than all training outcome confirmations'
+      using errcode = '22023';
+  end if;
+
+  if jsonb_typeof(v_run.metrics -> 'brier') is distinct from 'number'
+     or jsonb_typeof(v_run.metrics -> 'log_loss') is distinct from 'number' then
+    raise exception 'training run metrics must contain numeric Brier and log loss'
+      using errcode = '22023';
+  end if;
+
+  v_run_brier := (v_run.metrics ->> 'brier')::double precision;
+  v_run_log_loss := (v_run.metrics ->> 'log_loss')::double precision;
 
   if v_candidate.brier is null
      or v_candidate.log_loss is null
      or v_current.brier is null
      or v_current.log_loss is null
+     or v_run_brier is null
+     or v_run_log_loss is null
      or v_candidate.brier in ('NaN'::double precision, 'Infinity'::double precision, '-Infinity'::double precision)
      or v_candidate.log_loss in ('NaN'::double precision, 'Infinity'::double precision, '-Infinity'::double precision)
      or v_current.brier in ('NaN'::double precision, 'Infinity'::double precision, '-Infinity'::double precision)
-     or v_current.log_loss in ('NaN'::double precision, 'Infinity'::double precision, '-Infinity'::double precision) then
-    raise exception 'candidate and current metrics must be finite'
+     or v_current.log_loss in ('NaN'::double precision, 'Infinity'::double precision, '-Infinity'::double precision)
+     or v_run_brier in ('NaN'::double precision, 'Infinity'::double precision, '-Infinity'::double precision)
+     or v_run_log_loss in ('NaN'::double precision, 'Infinity'::double precision, '-Infinity'::double precision) then
+    raise exception 'candidate, run, and current metrics must be finite'
       using errcode = '22023';
   end if;
 
-  if v_candidate.brier >= v_current.brier
-     or v_candidate.log_loss >= v_current.log_loss then
+  if v_candidate.brier is distinct from v_run_brier
+     or v_candidate.log_loss is distinct from v_run_log_loss then
+    raise exception 'candidate metrics must match its training run'
+      using errcode = '22023';
+  end if;
+
+  if v_run_brier >= v_current.brier
+     or v_run_log_loss >= v_current.log_loss then
     raise exception 'candidate must strictly improve both Brier and log loss'
       using errcode = '22023';
   end if;
@@ -419,12 +543,12 @@ begin
   where id = p_candidate_id
   returning * into v_candidate;
 
-  select finished_at, decision::text
-  into v_last_finished_at, v_last_decision
-  from private.training_runs
-  where candidate_model_id = p_candidate_id
-  order by finished_at desc nulls last, started_at desc
-  limit 1;
+  update private.training_runs
+  set decision = 'succeeded',
+      reason = 'candidate promoted',
+      finished_at = now()
+  where id = v_run.id
+  returning * into v_run;
 
   insert into public.model_status_projection (
     singleton,
@@ -441,13 +565,13 @@ begin
   values (
     true,
     v_candidate.version,
-    v_candidate.train_size,
-    v_candidate.validation_size,
-    v_candidate.brier,
-    v_candidate.log_loss,
+    v_train_count,
+    v_validation_count,
+    v_run_brier,
+    v_run_log_loss,
     v_candidate.activated_at,
-    v_last_finished_at,
-    v_last_decision,
+    v_run.finished_at,
+    v_run.decision::text,
     now()
   )
   on conflict (singleton) do update
@@ -475,7 +599,7 @@ grant usage on type private.model_state, private.run_state to service_role;
 grant select, insert, update on all tables in schema private to service_role;
 
 grant execute on function private.claim_job(text, text, integer) to service_role;
-grant execute on function private.finish_job(uuid, text, jsonb, text) to service_role;
+grant execute on function private.finish_job(uuid, uuid, text, jsonb, text) to service_role;
 grant execute on function private.promote_model(uuid, uuid) to service_role;
 
 revoke all on public.live_match_projection,

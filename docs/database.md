@@ -18,7 +18,7 @@ The production Dashboard setting is under **Project Settings > Data API > Expose
 
 The migration applies these privileges:
 
-- `service_role`: `USAGE` on `private`; `USAGE` on `private.model_state` and `private.run_state`; `SELECT`, `INSERT`, and `UPDATE` on every private table; `EXECUTE` on `private.claim_job(text,text,integer)`, `private.finish_job(uuid,text,jsonb,text)`, and `private.promote_model(uuid,uuid)`.
+- `service_role`: `USAGE` on `private`; `USAGE` on `private.model_state` and `private.run_state`; `SELECT`, `INSERT`, and `UPDATE` on every private table; `EXECUTE` on `private.claim_job(text,text,integer)`, `private.finish_job(uuid,uuid,text,jsonb,text)`, and `private.promote_model(uuid,uuid)`.
 - `anon`, `authenticated`, and `service_role`: `USAGE` on `public`; `SELECT` on both projection tables and both security-invoker views.
 - `service_role`: `INSERT` and `UPDATE` on both projection tables.
 - `PUBLIC`, `anon`, and `authenticated`: no privileges on the `private` schema, its tables, sequences, enum types, or functions.
@@ -31,8 +31,8 @@ No table uses an identity or serial sequence. UUID primary keys use `gen_random_
 All RPCs are `SECURITY INVOKER`, set `search_path = ''`, explicitly require `current_user = 'service_role'`, and revoke execution from `PUBLIC`, `anon`, and `authenticated`.
 
 - `claim_job` accepts leases from 30 through 900 seconds and atomically inserts a run or reacquires the same idempotency key only when its running lease has expired.
-- `finish_job` accepts only terminal states and can finish only a running, unexpired lease.
-- `promote_model` locks the candidate and current rows, verifies the active model ID, requires at least 70 training and 30 validation fixtures, rejects null/non-finite metrics, requires strict improvement in both Brier score and log loss, retires the prior model, activates the candidate, and refreshes the public model projection in the same transaction.
+- `finish_job` requires both `run_id` and the current `request_id` fencing token. It accepts only terminal states and can finish only the matching running, unexpired lease; a worker holding the token from an expired lease cannot finish a reacquired row.
+- `promote_model` locks the candidate, current model, and uniquely bound training run. The run must still be `running` and unfinished. Its train/validation arrays must contain at least 70/30 distinct, non-null, non-overlapping fixture IDs with confirmed outcomes, and every validation fixture must have provider-observation evidence later than every training outcome confirmation. Candidate counts and finite Brier/log-loss values must match the bound run, and both metrics must strictly improve. Promotion retires the prior model, activates the candidate, finalizes the run with `candidate promoted`, and refreshes the public model projection in the same transaction.
 
 ## Indexes and RLS
 
