@@ -23,12 +23,14 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def require_production_secrets(self):
         if self.environment == "production":
-            required = (
-                self.supabase_url,
+            secrets = (
                 self.supabase_service_role_key,
                 self.cron_secret,
             )
-            if any(value is None for value in required):
+            if self.supabase_url is None or any(
+                secret is None or not secret.get_secret_value().strip()
+                for secret in secrets
+            ):
                 raise ValueError("Faltan secretos requeridos del servidor")
         return self
 
