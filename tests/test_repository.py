@@ -1,9 +1,11 @@
 from datetime import datetime, timezone
+import inspect
 from uuid import UUID
 
 import pytest
 from pydantic import ValidationError
 
+from football_live import domain
 from football_live.domain import Fixture, LiveSnapshot, ModelVersion, PredictionRecord
 from football_live.repository import Repository, RepositoryUnavailable
 from football_live.settings import Settings
@@ -14,7 +16,8 @@ FIXTURE_ID = UUID("4b1c7cb7-7ce5-4fc4-bf89-4744c80a31b1")
 SNAPSHOT_ID = UUID("22b244f7-771a-4ea3-953d-bfd828743a45")
 MODEL_ID = UUID("bb9ad924-88d5-4b87-9af4-143c3bda250e")
 RUN_ID = UUID("3746b572-e1fe-4131-a25b-7e33c92d8efe")
-REQUEST_ID = UUID("8d69f642-7623-4779-bebd-85d6fc167553")
+FENCING_REQUEST_ID = UUID("8d69f642-7623-4779-bebd-85d6fc167553")
+HTTP_REQUEST_ID = UUID("cec47ae5-66e1-445d-9073-78560b471e42")
 OBSERVED_AT = datetime(2026, 9, 24, 20, 3, 44, tzinfo=timezone.utc)
 MODEL_CREATED_AT = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
 
@@ -232,6 +235,27 @@ def test_prediction_probabilities_are_bounded(invalid_probability):
         )
 
 
+@pytest.mark.parametrize("field", ["lambda_base", "lambda_adjusted"])
+@pytest.mark.parametrize("non_finite", [float("nan"), float("inf"), float("-inf")])
+def test_prediction_lambdas_reject_non_finite_values(field, non_finite, prediction):
+    payload = prediction.model_dump()
+    payload[field]["home"] = non_finite
+
+    with pytest.raises(ValidationError):
+        PredictionRecord.model_validate(payload)
+
+
+@pytest.mark.parametrize("non_finite", [float("nan"), float("inf"), float("-inf")])
+def test_prediction_probabilities_reject_non_finite_values(
+    non_finite, prediction
+):
+    payload = prediction.model_dump()
+    payload["probabilities"]["home"] = non_finite
+
+    with pytest.raises(ValidationError):
+        PredictionRecord.model_validate(payload)
+
+
 def test_home_away_values_reject_provider_or_spanish_aliases():
     with pytest.raises(ValidationError):
         PredictionRecord(
@@ -271,6 +295,40 @@ def test_nonempty_probabilities_require_canonical_one_x_two_keys():
         )
 
 
+def test_probability_total_allows_rounding_and_derived_markets():
+    prediction = PredictionRecord(
+        fixture_id=FIXTURE_ID,
+        snapshot_id=SNAPSHOT_ID,
+        model_version_id=MODEL_ID,
+        lambda_base={"home": 1.2, "away": 0.9},
+        lambda_adjusted={"home": 1.3, "away": 0.8},
+        probabilities={
+            "home": 33.333333,
+            "draw": 33.333333,
+            "away": 33.333333,
+            "next_goal_home": 62.5,
+        },
+        explanation={},
+        quality="fresh",
+    )
+
+    assert prediction.probabilities["next_goal_home"] == 62.5
+
+
+def test_probability_total_rejects_noncanonical_one_x_two_sum():
+    with pytest.raises(ValidationError):
+        PredictionRecord(
+            fixture_id=FIXTURE_ID,
+            snapshot_id=SNAPSHOT_ID,
+            model_version_id=MODEL_ID,
+            lambda_base={"home": 1.2, "away": 0.9},
+            lambda_adjusted={"home": 1.3, "away": 0.8},
+            probabilities={"home": 40.0, "draw": 30.0, "away": 29.5},
+            explanation={},
+            quality="fresh",
+        )
+
+
 @pytest.mark.parametrize("field", ["brier", "log_loss"])
 def test_model_metrics_are_nonnegative_and_datetimes_are_aware(field, model_row):
     invalid = model_row | {field: -0.01}
@@ -282,8 +340,37 @@ def test_model_metrics_are_nonnegative_and_datetimes_are_aware(field, model_row)
         ModelVersion.model_validate(invalid)
 
 
+@pytest.mark.parametrize("field", ["brier", "log_loss"])
+@pytest.mark.parametrize("non_finite", [float("nan"), float("inf"), float("-inf")])
+def test_model_metrics_reject_non_finite_values(field, non_finite, model_row):
+    with pytest.raises(ValidationError):
+        ModelVersion.model_validate(model_row | {field: non_finite})
+
+
 def test_repository_is_a_protocol():
     assert Repository._is_protocol is True
+    assert list(inspect.signature(Repository.claim_job).parameters) == [
+        "self",
+        "name",
+        "key",
+        "lease_seconds",
+    ]
+
+
+def test_job_claim_is_strict_and_uses_uuid_fencing_fields():
+    claim = domain.JobClaim(
+        run_id=str(RUN_ID),
+        request_id=str(FENCING_REQUEST_ID),
+    )
+    assert claim.run_id == RUN_ID
+    assert claim.request_id == FENCING_REQUEST_ID
+
+    with pytest.raises(ValidationError):
+        domain.JobClaim(
+            run_id=RUN_ID,
+            request_id=FENCING_REQUEST_ID,
+            http_request_id=HTTP_REQUEST_ID,
+        )
 
 
 def test_gateway_creates_one_server_client_from_settings(fake_client):
@@ -371,8 +458,11 @@ def test_snapshot_write_uses_private_schema_and_keeps_observation_precision(
     ]
 
     assert gateway.store_snapshot(snapshot) == SNAPSHOT_ID
+    assert gateway.store_snapshot(snapshot) == SNAPSHOT_ID
 
-    operation = fake_client.operations[-1]
+    first_operation, operation = fake_client.operations[-2:]
+    assert first_operation["on_conflict"] == "fixture_id,observation_bucket"
+    assert operation["on_conflict"] == "fixture_id,observation_bucket"
     assert operation["schema"] == "private"
     assert operation["payload"] == {
         "fixture_id": str(FIXTURE_ID),
@@ -396,8 +486,11 @@ def test_prediction_write_uses_only_canonical_private_payload(
     ]
 
     assert gateway.store_prediction(prediction) == prediction_id
+    assert gateway.store_prediction(prediction) == prediction_id
 
-    operation = fake_client.operations[-1]
+    first_operation, operation = fake_client.operations[-2:]
+    assert first_operation["on_conflict"] == "snapshot_id,model_version_id"
+    assert operation["on_conflict"] == "snapshot_id,model_version_id"
     assert operation == {
         "schema": "private",
         "kind": "table",
@@ -413,6 +506,7 @@ def test_prediction_write_uses_only_canonical_private_payload(
             "explanation": {"signals": ["shots_on_target"]},
             "quality": "fresh",
         },
+        "on_conflict": "snapshot_id,model_version_id",
         "select": "id",
         "limit": 1,
     }
@@ -516,22 +610,24 @@ def test_job_rpcs_use_private_schema_and_exact_fencing_parameters(
     gateway, fake_client
 ):
     fake_client.responses[("private", "rpc", "claim_job")] = [
-        {"id": str(RUN_ID), "request_id": str(REQUEST_ID)}
+        {"id": str(RUN_ID), "request_id": str(FENCING_REQUEST_ID)}
     ]
 
-    claimed = gateway.claim_job(
-        "collect", "collect:2026-09-24T20:03Z", 120, REQUEST_ID
-    )
+    claimed = gateway.claim_job("collect", "collect:2026-09-24T20:03Z", 120)
+    assert isinstance(claimed, domain.JobClaim)
+    assert claimed.run_id == RUN_ID
+    assert claimed.request_id == FENCING_REQUEST_ID
+    assert claimed.request_id != HTTP_REQUEST_ID
+
     gateway.finish_job(
-        RUN_ID,
-        REQUEST_ID,
+        claimed.run_id,
+        claimed.request_id,
         "failed",
         {"processed": 2},
         "provider_unavailable",
     )
 
     claim, finish = fake_client.operations[-2:]
-    assert claimed == {"id": str(RUN_ID), "request_id": str(REQUEST_ID)}
     assert claim == {
         "schema": "private",
         "kind": "rpc",
@@ -548,7 +644,7 @@ def test_job_rpcs_use_private_schema_and_exact_fencing_parameters(
         "name": "finish_job",
         "params": {
             "p_run_id": str(RUN_ID),
-            "p_request_id": str(REQUEST_ID),
+            "p_request_id": str(FENCING_REQUEST_ID),
             "p_state": "failed",
             "p_counters": {"processed": 2},
             "p_sanitized_error": "provider_unavailable",

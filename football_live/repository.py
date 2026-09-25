@@ -1,7 +1,7 @@
 from typing import Protocol, Sequence
 from uuid import UUID
 
-from .domain import Fixture, LiveSnapshot, ModelVersion, PredictionRecord
+from .domain import Fixture, JobClaim, LiveSnapshot, ModelVersion, PredictionRecord
 
 
 class RepositoryUnavailable(RuntimeError):
@@ -25,9 +25,7 @@ class Repository(Protocol):
 
     def public_model_status(self) -> dict: ...
 
-    def claim_job(
-        self, name: str, key: str, lease_seconds: int, request_id: UUID
-    ) -> dict | None: ...
+    def claim_job(self, name: str, key: str, lease_seconds: int) -> JobClaim | None: ...
 
     def finish_job(
         self,

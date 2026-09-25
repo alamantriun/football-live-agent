@@ -2,17 +2,26 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
+from math import isclose
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    FiniteFloat,
+    field_validator,
+    model_validator,
+)
 
 
-Probability = Annotated[float, Field(ge=0.0, le=100.0)]
-NonNegativeFloat = Annotated[float, Field(ge=0.0)]
+Probability = Annotated[FiniteFloat, Field(ge=0.0, le=100.0)]
+NonNegativeFloat = Annotated[FiniteFloat, Field(ge=0.0)]
 Score = Annotated[int, Field(ge=0, le=30)]
 MatchMinute = Annotated[int, Field(ge=0, le=150)]
-StatValue = int | float | None
+StatValue = int | FiniteFloat | None
 
 
 class StrictDomainModel(BaseModel):
@@ -24,6 +33,11 @@ class DataStatus(StrEnum):
     DEGRADED = "degraded"
     STALE = "stale"
     SUSPENDED = "suspended"
+
+
+class JobClaim(StrictDomainModel):
+    run_id: UUID
+    request_id: UUID
 
 
 class HomeAwayStat(StrictDomainModel):
@@ -105,6 +119,10 @@ class PredictionRecord(StrictDomainModel):
         )
         if unsupported:
             raise ValueError("probability keys must use canonical home/away names")
+        if probabilities:
+            canonical_total = sum(probabilities[key] for key in required)
+            if not isclose(canonical_total, 100.0, rel_tol=0.0, abs_tol=1e-6):
+                raise ValueError("canonical home/draw/away probabilities must total 100")
         return probabilities
 
 

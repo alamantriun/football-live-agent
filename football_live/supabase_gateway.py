@@ -4,7 +4,7 @@ from collections.abc import Callable, Sequence
 from typing import Any
 from uuid import UUID
 
-from .domain import Fixture, LiveSnapshot, ModelVersion, PredictionRecord
+from .domain import Fixture, JobClaim, LiveSnapshot, ModelVersion, PredictionRecord
 from .repository import RepositoryUnavailable
 from .settings import Settings
 
@@ -140,7 +140,7 @@ class SupabaseGateway:
         response = self._execute(
             lambda: self._client.schema("private")
             .table("live_snapshots")
-            .insert(payload)
+            .upsert(payload, on_conflict="fixture_id,observation_bucket")
             .select("id")
             .limit(1)
             .execute()
@@ -163,7 +163,7 @@ class SupabaseGateway:
         response = self._execute(
             lambda: self._client.schema("private")
             .table("predictions")
-            .insert(payload)
+            .upsert(payload, on_conflict="snapshot_id,model_version_id")
             .select("id")
             .limit(1)
             .execute()
@@ -221,11 +221,7 @@ class SupabaseGateway:
         rows = self._rows(response)
         return rows[0] if rows else {}
 
-    def claim_job(
-        self, name: str, key: str, lease_seconds: int, request_id: UUID
-    ) -> dict | None:
-        # Task 2's RPC creates and returns the authoritative fencing token.
-        del request_id
+    def claim_job(self, name: str, key: str, lease_seconds: int) -> JobClaim | None:
         response = self._execute(
             lambda: self._client.schema("private")
             .rpc(
@@ -239,7 +235,9 @@ class SupabaseGateway:
             .execute()
         )
         rows = self._rows(response)
-        return rows[0] if rows else None
+        if not rows:
+            return None
+        return JobClaim(run_id=rows[0]["id"], request_id=rows[0]["request_id"])
 
     def finish_job(
         self,
