@@ -14,13 +14,20 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from evaluar_modelo import puntuaciones, vector
-from modelo_poisson import predecir
+from football_live.training import (
+    MIN_TRAIN,
+    MIN_VALID,
+    TrainingExample,
+    TrainingObservation,
+    build_chronological_split,
+    fit_factors,
+    promotion_allowed,
+    score_examples,
+)
 from registro_vivo import DEFAULT_DB, VERSION, abrir_db
 
 MODEL_PATH = DEFAULT_DB.parent / "modelo_vivo.json"
 STATE_PATH = DEFAULT_DB.parent / "aprendizaje_estado.json"
-MIN_TRAIN, MIN_VALID = 70, 30
 BASE = {"version": VERSION, "factores": {"local": 1.0, "visitante": 1.0}, "aprobado": False}
 
 
@@ -106,44 +113,70 @@ def cargar_ejemplos(path=DEFAULT_DB):
     return sorted(grupos.values(), key=lambda g: (g["primero"], g["fixture"]))
 
 
+def _id_entrenamiento(fixture):
+    try:
+        return uuid.UUID(str(fixture))
+    except ValueError:
+        return uuid.uuid5(uuid.NAMESPACE_URL, f"football-live:{fixture}")
+
+
+def _ejemplo_cloud(grupo):
+    observaciones = []
+    final_home = final_away = None
+    for ejemplo in grupo["ejemplos"].values():
+        score_home = int(ejemplo["marcador"]["local"])
+        score_away = int(ejemplo["marcador"]["visitante"])
+        current_final_home = score_home + int(ejemplo["restantes"][0])
+        current_final_away = score_away + int(ejemplo["restantes"][1])
+        if final_home is None:
+            final_home, final_away = current_final_home, current_final_away
+        elif (final_home, final_away) != (current_final_home, current_final_away):
+            raise ValueError("Resultado final inconsistente entre observaciones")
+        observaciones.append(
+            TrainingObservation(
+                observed_at=fecha(ejemplo["timestamp"]),
+                minute=ejemplo["minuto"],
+                score_home=score_home,
+                score_away=score_away,
+                lambda_base={"home": ejemplo["base"][0], "away": ejemplo["base"][1]},
+            )
+        )
+    observaciones.sort(key=lambda item: (item.observed_at, item.minute))
+    return TrainingExample(
+        fixture_id=_id_entrenamiento(grupo["fixture"]),
+        first_observed_at=observaciones[0].observed_at,
+        outcome_confirmed_at=grupo["final"],
+        final_home=final_home,
+        final_away=final_away,
+        observations=tuple(observaciones),
+    )
+
+
 def dividir(grupos, consumidos):
-    nuevos = [g for g in grupos if g["fixture"] not in consumidos]
-    if len(nuevos) < MIN_VALID:
-        return [], []
-    valid = nuevos[-MIN_VALID:]
-    corte = min(g["primero"] for g in valid)
-    ids = {g["fixture"] for g in valid}
-    # El resultado de cada partido de entrenamiento debía ser conocido ANTES
-    # de la primera observación utilizada en validación (purga de solapamientos).
-    train = [g for g in grupos if g["fixture"] not in ids and g["final"] < corte]
-    return train, valid
+    pares = [(_ejemplo_cloud(grupo), grupo) for grupo in grupos]
+    originales = {ejemplo.fixture_id: grupo for ejemplo, grupo in pares}
+    train, valid = build_chronological_split(
+        [ejemplo for ejemplo, _ in pares],
+        {_id_entrenamiento(fixture) for fixture in consumidos},
+    )
+    return (
+        [originales[ejemplo.fixture_id] for ejemplo in train],
+        [originales[ejemplo.fixture_id] for ejemplo in valid],
+    )
 
 
 def ajustar(grupos):
-    numeradores, denominadores = [20.0, 20.0], [20.0, 20.0]
-    for g in grupos:
-        peso = 1 / len(g["ejemplos"])
-        for e in g["ejemplos"].values():
-            for i in range(2):
-                numeradores[i] += peso * e["restantes"][i]
-                denominadores[i] += peso * e["base"][i]
-    return {lado: max(.6, min(1.6, numeradores[i]/denominadores[i]))
-            for i, lado in enumerate(("local", "visitante"))}
+    return fit_factors([_ejemplo_cloud(grupo) for grupo in grupos])
 
 
 def evaluar(grupos, factores):
-    por_partido = []
-    for g in grupos:
-        scores = []
-        for e in g["ejemplos"].values():
-            p = predecir(e["base"][0]*factores["local"], e["base"][1]*factores["visitante"], e["marcador"], muestras=0)
-            scores.append(puntuaciones(vector(p), e["y"]))
-        por_partido.append({k: sum(s[k] for s in scores)/len(scores) for k in scores[0]})
-    return {k: sum(s[k] for s in por_partido)/len(por_partido) for k in por_partido[0]}
+    return score_examples(
+        [_ejemplo_cloud(grupo) for grupo in grupos], factores
+    ).model_dump()
 
 
 def supera(candidato, referencia):
-    return candidato["log_loss"] < referencia["log_loss"] * .99 and candidato["brier"] <= referencia["brier"]
+    return promotion_allowed(candidato, referencia, referencia)
 
 
 def entrenar(path=DEFAULT_DB, model_path=MODEL_PATH, state_path=STATE_PATH):

@@ -7,6 +7,7 @@ from uuid import UUID
 from .domain import Fixture, JobClaim, LiveSnapshot, ModelVersion, PredictionRecord
 from .repository import RepositoryUnavailable
 from .settings import Settings
+from .training import CandidateEvaluation, TrainingExample, TrainingRun
 
 
 PUBLIC_ERROR = "El repositorio no está disponible temporalmente."
@@ -28,6 +29,10 @@ PUBLIC_LIVE_SELECT = (
 PUBLIC_MODEL_SELECT = (
     "version,train_size,validation_size,brier,log_loss,activated_at,"
     "last_training_finished_at,last_training_decision,updated_at"
+)
+TRAINING_EXAMPLE_SELECT = (
+    "fixture_id,first_observed_at,outcome_confirmed_at,final_home,"
+    "final_away,observations"
 )
 
 
@@ -182,6 +187,99 @@ class SupabaseGateway:
         rows = self._rows(response)
         if not rows:
             raise LookupError("No active model is available")
+        return ModelVersion.model_validate(rows[0])
+
+    def training_examples(self, limit: int = 1000) -> list[TrainingExample]:
+        response = self._execute(
+            lambda: self._client.schema("private")
+            .table("training_examples")
+            .select(TRAINING_EXAMPLE_SELECT)
+            .order("first_observed_at", desc=True)
+            .limit(self._cap(limit, 1000))
+            .execute()
+        )
+        return [TrainingExample.model_validate(row) for row in self._rows(response)]
+
+    def consumed_validation_ids(self, limit: int = 50000) -> set[UUID]:
+        bounded_limit = self._cap(limit, 50000)
+        response = self._execute(
+            lambda: self._client.schema("private")
+            .table("consumed_validation_fixtures")
+            .select("fixture_id")
+            .order("fixture_id")
+            .limit(bounded_limit + 1)
+            .execute()
+        )
+        rows = self._rows(response)
+        if len(rows) > bounded_limit:
+            raise RepositoryUnavailable(PUBLIC_ERROR)
+        try:
+            return {UUID(str(row["fixture_id"])) for row in rows}
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RepositoryUnavailable(PUBLIC_ERROR) from exc
+
+    def record_training_evaluation(
+        self, evaluation: CandidateEvaluation
+    ) -> TrainingRun:
+        metrics = {
+            "candidate": evaluation.candidate_metrics.model_dump(),
+            "champion": evaluation.champion_metrics.model_dump(),
+            "baseline": evaluation.baseline_metrics.model_dump(),
+        }
+        response = self._execute(
+            lambda: self._client.schema("private")
+            .rpc(
+                "record_training_evaluation",
+                {
+                    "p_version": evaluation.version,
+                    "p_parameters": evaluation.parameters,
+                    "p_parameter_hash": evaluation.parameter_hash,
+                    "p_code_version": evaluation.code_version,
+                    "p_previous_model_id": str(evaluation.previous_model_id),
+                    "p_train_fixture_ids": [
+                        str(item) for item in evaluation.train_fixture_ids
+                    ],
+                    "p_validation_fixture_ids": [
+                        str(item) for item in evaluation.validation_fixture_ids
+                    ],
+                    "p_metrics": metrics,
+                    "p_approved": evaluation.approved,
+                    "p_reason": evaluation.reason,
+                },
+            )
+            .execute()
+        )
+        rows = self._rows(response)
+        try:
+            row = rows[0]
+            status = "candidate" if row["decision"] == "running" else "rejected"
+            return TrainingRun(
+                id=row["id"],
+                candidate_model_id=row["candidate_model_id"],
+                status=status,
+                train_fixture_ids=evaluation.train_fixture_ids,
+                validation_fixture_ids=evaluation.validation_fixture_ids,
+                parameter_hash=evaluation.parameter_hash,
+                active_model_id=evaluation.previous_model_id,
+            )
+        except (IndexError, KeyError, TypeError, ValueError) as exc:
+            raise RepositoryUnavailable(PUBLIC_ERROR) from exc
+
+    def promote_model(self, candidate_id: UUID, current_id: UUID) -> ModelVersion:
+        response = self._execute(
+            lambda: self._client.schema("private")
+            .rpc(
+                "promote_model",
+                {
+                    "p_candidate_id": str(candidate_id),
+                    "p_current_id": str(current_id),
+                },
+            )
+            .execute()
+        )
+        rows = self._rows(response)
+        if not rows:
+            raise RepositoryUnavailable(PUBLIC_ERROR)
         return ModelVersion.model_validate(rows[0])
 
     def public_live(self, limit: int, cursor: str | None) -> list[dict]:

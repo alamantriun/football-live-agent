@@ -1,7 +1,12 @@
-from typing import Protocol, Sequence
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Protocol, Sequence
 from uuid import UUID
 
 from .domain import Fixture, JobClaim, LiveSnapshot, ModelVersion, PredictionRecord
+
+if TYPE_CHECKING:
+    from .training import CandidateEvaluation, TrainingExample, TrainingRun
 
 
 class RepositoryUnavailable(RuntimeError):
@@ -18,6 +23,16 @@ class Repository(Protocol):
     def store_prediction(self, prediction: PredictionRecord) -> UUID: ...
 
     def active_model(self) -> ModelVersion: ...
+
+    def training_examples(self, limit: int = 1000) -> list[TrainingExample]: ...
+
+    def consumed_validation_ids(self, limit: int = 50000) -> set[UUID]: ...
+
+    def record_training_evaluation(
+        self, evaluation: CandidateEvaluation
+    ) -> TrainingRun: ...
+
+    def promote_model(self, candidate_id: UUID, current_id: UUID) -> ModelVersion: ...
 
     def public_live(self, limit: int, cursor: str | None) -> list[dict]: ...
 

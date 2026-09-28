@@ -10,11 +10,17 @@ from football_live.domain import Fixture, LiveSnapshot, ModelVersion, Prediction
 from football_live.repository import Repository, RepositoryUnavailable
 from football_live.settings import Settings
 from football_live.supabase_gateway import SupabaseGateway
+from football_live.training import (
+    CandidateEvaluation,
+    TrainingExample,
+    TrainingMetrics,
+)
 
 
 FIXTURE_ID = UUID("4b1c7cb7-7ce5-4fc4-bf89-4744c80a31b1")
 SNAPSHOT_ID = UUID("22b244f7-771a-4ea3-953d-bfd828743a45")
 MODEL_ID = UUID("bb9ad924-88d5-4b87-9af4-143c3bda250e")
+CURRENT_MODEL_ID = UUID("10000000-0000-0000-0000-000000000001")
 RUN_ID = UUID("3746b572-e1fe-4131-a25b-7e33c92d8efe")
 FENCING_REQUEST_ID = UUID("8d69f642-7623-4779-bebd-85d6fc167553")
 HTTP_REQUEST_ID = UUID("cec47ae5-66e1-445d-9073-78560b471e42")
@@ -682,3 +688,137 @@ def test_client_creation_failure_is_sanitized_and_chained():
     assert str(captured.value) == "El repositorio no está disponible temporalmente."
     assert "server-secret" not in str(captured.value)
     assert captured.value.__cause__ is transport_error
+
+
+def test_training_examples_use_private_bounded_explicit_projection(gateway, fake_client):
+    fixture_id = UUID(int=1)
+    fake_client.responses[("private", "table", "training_examples")] = [
+        {
+            "fixture_id": str(fixture_id),
+            "first_observed_at": "2026-01-01T10:00:00Z",
+            "outcome_confirmed_at": "2026-01-01T12:00:00Z",
+            "final_home": 2,
+            "final_away": 0,
+            "observations": [
+                {
+                    "observed_at": "2026-01-01T10:00:00Z",
+                    "minute": 60,
+                    "score_home": 0,
+                    "score_away": 0,
+                    "lambda_base": {"home": 0.8, "away": 0.2},
+                }
+            ],
+        }
+    ]
+
+    examples = gateway.training_examples(limit=50000)
+
+    assert examples == [TrainingExample.model_validate(fake_client.responses[("private", "table", "training_examples")][0])]
+    operation = fake_client.operations[-1]
+    assert operation == {
+        "schema": "private",
+        "kind": "table",
+        "name": "training_examples",
+        "params": None,
+        "select": (
+            "fixture_id,first_observed_at,outcome_confirmed_at,final_home,"
+            "final_away,observations"
+        ),
+        "order": ("first_observed_at", True),
+        "limit": 1000,
+    }
+
+
+def test_consumed_validation_ids_use_service_only_bounded_view(gateway, fake_client):
+    ids = [UUID(int=1), UUID(int=2)]
+    fake_client.responses[("private", "table", "consumed_validation_fixtures")] = [
+        {"fixture_id": str(item)} for item in ids
+    ]
+
+    assert gateway.consumed_validation_ids() == set(ids)
+    assert fake_client.operations[-1] == {
+        "schema": "private",
+        "kind": "table",
+        "name": "consumed_validation_fixtures",
+        "params": None,
+        "select": "fixture_id",
+        "order": ("fixture_id", False),
+        "limit": 50001,
+    }
+
+
+def test_consumed_validation_ids_fail_closed_instead_of_truncating(
+    gateway, fake_client
+):
+    fake_client.responses[("private", "table", "consumed_validation_fixtures")] = [
+        {"fixture_id": str(UUID(int=index))} for index in range(1, 4)
+    ]
+
+    with pytest.raises(RepositoryUnavailable):
+        gateway.consumed_validation_ids(limit=2)
+
+    assert fake_client.operations[-1]["limit"] == 3
+
+
+def test_training_evidence_and_promotion_use_exact_private_rpcs(
+    gateway, fake_client, model_row
+):
+    train_ids = tuple(UUID(int=index) for index in range(1, 71))
+    validation_ids = tuple(UUID(int=index) for index in range(71, 101))
+    evaluation = CandidateEvaluation(
+        version="live-fit-abc123",
+        parameters={"factores": {"local": 1.1, "visitante": 0.9}},
+        parameter_hash="a" * 64,
+        code_version="abc123",
+        previous_model_id=MODEL_ID,
+        train_fixture_ids=train_ids,
+        validation_fixture_ids=validation_ids,
+        candidate_metrics=TrainingMetrics(brier=0.18, log_loss=0.58),
+        champion_metrics=TrainingMetrics(brier=0.19, log_loss=0.61),
+        baseline_metrics=TrainingMetrics(brier=0.21, log_loss=0.65),
+        approved=True,
+        reason="candidate strictly improved both metrics",
+    )
+    fake_client.responses[("private", "rpc", "record_training_evaluation")] = [
+        {
+            "id": str(RUN_ID),
+            "candidate_model_id": str(MODEL_ID),
+            "decision": "running",
+        }
+    ]
+    fake_client.responses[("private", "rpc", "promote_model")] = [model_row]
+
+    recorded = gateway.record_training_evaluation(evaluation)
+    promoted = gateway.promote_model(MODEL_ID, CURRENT_MODEL_ID)
+
+    assert recorded.id == RUN_ID
+    assert recorded.status == "candidate"
+    assert promoted.id == MODEL_ID
+    record_operation, promote_operation = fake_client.operations[-2:]
+    assert record_operation["schema"] == "private"
+    assert record_operation["name"] == "record_training_evaluation"
+    assert record_operation["params"] == {
+        "p_version": evaluation.version,
+        "p_parameters": evaluation.parameters,
+        "p_parameter_hash": evaluation.parameter_hash,
+        "p_code_version": evaluation.code_version,
+        "p_previous_model_id": str(MODEL_ID),
+        "p_train_fixture_ids": [str(item) for item in train_ids],
+        "p_validation_fixture_ids": [str(item) for item in validation_ids],
+        "p_metrics": {
+            "candidate": {"brier": 0.18, "log_loss": 0.58},
+            "champion": {"brier": 0.19, "log_loss": 0.61},
+            "baseline": {"brier": 0.21, "log_loss": 0.65},
+        },
+        "p_approved": True,
+        "p_reason": "candidate strictly improved both metrics",
+    }
+    assert promote_operation == {
+        "schema": "private",
+        "kind": "rpc",
+        "name": "promote_model",
+        "params": {
+            "p_candidate_id": str(MODEL_ID),
+            "p_current_id": str(CURRENT_MODEL_ID),
+        },
+    }

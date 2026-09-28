@@ -252,7 +252,13 @@ select
   (select array_agg(id order by provider_fixture_id) from private.fixtures where provider_fixture_id like 'test-train-%'),
   (select array_agg(id order by provider_fixture_id) from private.fixtures where provider_fixture_id like 'test-valid-%'),
   candidate_id,
-  jsonb_build_object('brier', 0.30, 'log_loss', 0.70),
+  jsonb_build_object(
+    'brier', 0.30,
+    'log_loss', 0.70,
+    'candidate', jsonb_build_object('brier', 0.30, 'log_loss', 0.70),
+    'champion', jsonb_build_object('brier', 0.40, 'log_loss', 0.80),
+    'baseline', jsonb_build_object('brier', 0.50, 'log_loss', 0.90)
+  ),
   'running'::private.run_state
 from (
   values
