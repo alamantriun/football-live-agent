@@ -9,6 +9,19 @@ create index consumed_validation_fixtures_training_run_id_idx
 
 alter table private.consumed_validation_fixtures enable row level security;
 
+alter table private.training_runs
+  add column parameter_hash text;
+
+alter table private.training_runs
+  add constraint training_runs_parameter_hash_format
+  check (parameter_hash is null or parameter_hash ~ '^[0-9a-f]{64}$');
+
+create index training_runs_recovery_idx
+  on private.training_runs (started_at, id)
+  where decision = 'running'
+    and finished_at is null
+    and candidate_model_id is not null;
+
 insert into private.consumed_validation_fixtures (fixture_id, training_run_id, consumed_at)
 select distinct on (validation_ids.fixture_id)
   validation_ids.fixture_id,
@@ -89,6 +102,70 @@ from ranked_windows
 where window_rank = 1
 group by fixture_id;
 
+create function private.canonical_jsonb(p_value jsonb)
+returns text
+language sql
+immutable
+strict
+parallel safe
+security invoker
+set search_path = ''
+as $$
+  select case jsonb_typeof(p_value)
+    when 'object' then
+      '{' || coalesce((
+        select string_agg(
+          to_jsonb(entries.key)::text || ':' || private.canonical_jsonb(entries.value),
+          ',' order by entries.key collate "C"
+        )
+        from jsonb_each(p_value) as entries(key, value)
+      ), '') || '}'
+    when 'array' then
+      '[' || coalesce((
+        select string_agg(
+          private.canonical_jsonb(elements.value),
+          ',' order by elements.ordinality
+        )
+        from jsonb_array_elements(p_value) with ordinality as elements(value, ordinality)
+      ), '') || ']'
+    else p_value::text
+  end
+$$;
+
+create function private.compute_training_hash(
+  p_parameters jsonb,
+  p_train_fixture_ids uuid[],
+  p_validation_fixture_ids uuid[],
+  p_code_version text
+)
+returns text
+language plpgsql
+immutable
+strict
+parallel safe
+security invoker
+set search_path = ''
+as $$
+declare
+  v_payload text;
+begin
+  v_payload := private.canonical_jsonb(jsonb_build_object(
+    'code_version', p_code_version,
+    'parameters', p_parameters,
+    'train_fixture_ids', coalesce((
+      select jsonb_agg(ids.fixture_id::text order by ids.fixture_id::text collate "C")
+      from unnest(p_train_fixture_ids) as ids(fixture_id)
+    ), '[]'::jsonb),
+    'validation_fixture_ids', coalesce((
+      select jsonb_agg(ids.fixture_id::text order by ids.fixture_id::text collate "C")
+      from unnest(p_validation_fixture_ids) as ids(fixture_id)
+    ), '[]'::jsonb)
+  ));
+
+  return encode(public.digest(convert_to(v_payload, 'UTF8'), 'sha256'), 'hex');
+end;
+$$;
+
 create function private.enforce_model_version_immutability()
 returns trigger
 language plpgsql
@@ -96,10 +173,6 @@ security invoker
 set search_path = ''
 as $$
 begin
-  if old.parameter_hash !~ '^[0-9a-f]{64}$' then
-    return new;
-  end if;
-
   if new.version is distinct from old.version
      or new.parameters is distinct from old.parameters
      or new.parameter_hash is distinct from old.parameter_hash
@@ -152,10 +225,49 @@ create trigger model_versions_immutable_evidence
 before update on private.model_versions
 for each row execute function private.enforce_model_version_immutability();
 
+create function private.enforce_training_run_immutability()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  if new.id is distinct from old.id
+     or new.started_at is distinct from old.started_at
+     or new.train_fixture_ids is distinct from old.train_fixture_ids
+     or new.validation_fixture_ids is distinct from old.validation_fixture_ids
+     or new.candidate_model_id is distinct from old.candidate_model_id
+     or new.parameter_hash is distinct from old.parameter_hash
+     or new.metrics is distinct from old.metrics then
+    raise exception 'training run evidence is immutable'
+      using errcode = '22023';
+  end if;
+
+  if new.decision is distinct from old.decision then
+    if old.decision <> 'running'
+       or new.decision not in ('succeeded', 'failed', 'rejected')
+       or old.finished_at is not null
+       or new.finished_at is null then
+      raise exception 'invalid training run lifecycle transition'
+        using errcode = '22023';
+    end if;
+  elsif new.finished_at is distinct from old.finished_at
+        or new.reason is distinct from old.reason
+        or new.sanitized_error is distinct from old.sanitized_error then
+    raise exception 'invalid training run lifecycle transition'
+      using errcode = '22023';
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger training_runs_immutable_evidence
+before update on private.training_runs
+for each row execute function private.enforce_training_run_immutability();
+
 create function private.record_training_evaluation(
-  p_version text,
   p_parameters jsonb,
-  p_parameter_hash text,
   p_code_version text,
   p_previous_model_id uuid,
   p_train_fixture_ids uuid[],
@@ -173,6 +285,8 @@ declare
   v_active private.model_versions%rowtype;
   v_candidate_id uuid;
   v_run private.training_runs%rowtype;
+  v_parameter_hash text;
+  v_version text;
   v_train_count integer;
   v_validation_count integer;
   v_train_evidence_count integer;
@@ -192,9 +306,7 @@ begin
       using errcode = '42501';
   end if;
 
-  if nullif(btrim(p_version), '') is null
-     or nullif(btrim(p_code_version), '') is null
-     or p_parameter_hash !~ '^[0-9a-f]{64}$'
+  if nullif(btrim(p_code_version), '') is null
      or jsonb_typeof(p_parameters) is distinct from 'object'
      or p_previous_model_id is null
      or p_train_fixture_ids is null
@@ -311,6 +423,14 @@ begin
       using errcode = '22023';
   end if;
 
+  v_parameter_hash := private.compute_training_hash(
+    p_parameters,
+    p_train_fixture_ids,
+    p_validation_fixture_ids,
+    p_code_version
+  );
+  v_version := 'live-fit-' || substr(v_parameter_hash, 1, 12);
+
   insert into private.model_versions (
     version,
     state,
@@ -324,10 +444,10 @@ begin
     log_loss
   )
   values (
-    p_version,
+    v_version,
     case when p_approved then 'candidate'::private.model_state else 'rejected'::private.model_state end,
     p_parameters,
-    p_parameter_hash,
+    v_parameter_hash,
     p_code_version,
     p_previous_model_id,
     v_train_count,
@@ -342,6 +462,7 @@ begin
     train_fixture_ids,
     validation_fixture_ids,
     candidate_model_id,
+    parameter_hash,
     metrics,
     decision,
     reason
@@ -351,6 +472,7 @@ begin
     p_train_fixture_ids,
     p_validation_fixture_ids,
     v_candidate_id,
+    v_parameter_hash,
     jsonb_build_object(
       'brier', v_candidate_brier,
       'log_loss', v_candidate_log_loss
@@ -395,6 +517,7 @@ declare
   v_champion_log_loss double precision;
   v_baseline_brier double precision;
   v_baseline_log_loss double precision;
+  v_expected_parameter_hash text;
 begin
   if current_user <> 'service_role' then
     raise exception 'service_role is required'
@@ -484,6 +607,22 @@ begin
   if v_candidate.train_size <> v_train_count
      or v_candidate.validation_size <> v_validation_count then
     raise exception 'candidate sample counts must match its training run'
+      using errcode = '22023';
+  end if;
+
+  v_expected_parameter_hash := private.compute_training_hash(
+    v_candidate.parameters,
+    v_run.train_fixture_ids,
+    v_run.validation_fixture_ids,
+    v_candidate.code_version
+  );
+
+  if v_candidate.parameter_hash ~ '^[0-9a-f]{64}$'
+     and (
+       v_candidate.parameter_hash is distinct from v_expected_parameter_hash
+       or v_run.parameter_hash is distinct from v_expected_parameter_hash
+     ) then
+    raise exception 'candidate and training run must match the canonical evidence hash'
       using errcode = '22023';
   end if;
 
@@ -626,13 +765,162 @@ begin
 end;
 $$;
 
+create function private.finalize_training_evaluation(p_run_id uuid)
+returns private.training_runs
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_run private.training_runs%rowtype;
+  v_candidate private.model_versions%rowtype;
+begin
+  if current_user <> 'service_role' then
+    raise exception 'service_role is required'
+      using errcode = '42501';
+  end if;
+
+  if p_run_id is null then
+    raise exception 'training run ID is required'
+      using errcode = '22023';
+  end if;
+
+  select * into v_run
+  from private.training_runs
+  where id = p_run_id;
+
+  if not found then
+    raise exception 'training run not found'
+      using errcode = 'P0002';
+  end if;
+
+  select * into v_candidate
+  from private.model_versions
+  where id = v_run.candidate_model_id
+  for update;
+
+  if not found then
+    raise exception 'candidate model not found'
+      using errcode = 'P0002';
+  end if;
+
+  select * into v_run
+  from private.training_runs
+  where id = p_run_id
+  for update;
+
+  if v_run.decision = 'succeeded' then
+    if v_candidate.state <> 'active' then
+      raise exception 'succeeded run is not bound to the active candidate'
+        using errcode = '22023';
+    end if;
+    return v_run;
+  end if;
+
+  if v_run.decision in ('rejected', 'failed') then
+    return v_run;
+  end if;
+
+  if v_run.decision <> 'running' or v_run.finished_at is not null then
+    raise exception 'training run lifecycle is inconsistent'
+      using errcode = '22023';
+  end if;
+
+  if v_candidate.state = 'active' then
+    update private.training_runs
+    set decision = 'succeeded',
+        reason = 'candidate promotion confirmed during reconciliation',
+        sanitized_error = null,
+        finished_at = now()
+    where id = v_run.id
+    returning * into v_run;
+    return v_run;
+  end if;
+
+  if v_candidate.state = 'candidate' then
+    update private.model_versions
+    set state = 'rejected'
+    where id = v_candidate.id;
+  elsif v_candidate.state <> 'rejected' then
+    raise exception 'running evaluation has an invalid candidate state'
+      using errcode = '22023';
+  end if;
+
+  update private.training_runs
+  set decision = 'failed',
+      reason = 'promotion was not committed; candidate rejected during reconciliation',
+      sanitized_error = 'promotion outcome reconciled as not committed',
+      finished_at = now()
+  where id = v_run.id
+  returning * into v_run;
+
+  return v_run;
+end;
+$$;
+
+create function private.recover_abandoned_training_evaluations(
+  p_stale_after_seconds integer default 900,
+  p_limit integer default 100
+)
+returns setof private.training_runs
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_run_id uuid;
+  v_run private.training_runs%rowtype;
+begin
+  if current_user <> 'service_role' then
+    raise exception 'service_role is required'
+      using errcode = '42501';
+  end if;
+
+  if p_stale_after_seconds is null
+     or p_stale_after_seconds < 900
+     or p_stale_after_seconds > 86400
+     or p_limit is null
+     or p_limit < 1
+     or p_limit > 100 then
+    raise exception 'safe recovery age and bounded batch are required'
+      using errcode = '22023';
+  end if;
+
+  for v_run_id in
+    select runs.id
+    from private.training_runs as runs
+    where runs.decision = 'running'
+      and runs.finished_at is null
+      and runs.candidate_model_id is not null
+      and runs.started_at <= now() - make_interval(secs => p_stale_after_seconds)
+    order by runs.started_at, runs.id
+    limit p_limit
+  loop
+    select * into v_run
+    from private.finalize_training_evaluation(v_run_id);
+    return next v_run;
+  end loop;
+
+  return;
+end;
+$$;
+
 revoke all on private.consumed_validation_fixtures from public, anon, authenticated, service_role;
 revoke all on private.training_examples from public, anon, authenticated, service_role;
+revoke all on function private.canonical_jsonb(jsonb) from public, anon, authenticated, service_role;
+revoke all on function private.compute_training_hash(jsonb, uuid[], uuid[], text) from public, anon, authenticated, service_role;
 revoke all on function private.enforce_model_version_immutability() from public, anon, authenticated, service_role;
-revoke all on function private.record_training_evaluation(text, jsonb, text, text, uuid, uuid[], uuid[], jsonb, boolean, text) from public, anon, authenticated, service_role;
+revoke all on function private.enforce_training_run_immutability() from public, anon, authenticated, service_role;
+revoke all on function private.record_training_evaluation(jsonb, text, uuid, uuid[], uuid[], jsonb, boolean, text) from public, anon, authenticated, service_role;
 revoke all on function private.promote_model(uuid, uuid) from public, anon, authenticated, service_role;
+revoke all on function private.finalize_training_evaluation(uuid) from public, anon, authenticated, service_role;
+revoke all on function private.recover_abandoned_training_evaluations(integer, integer) from public, anon, authenticated, service_role;
 
 grant select, insert on private.consumed_validation_fixtures to service_role;
 grant select on private.training_examples to service_role;
-grant execute on function private.record_training_evaluation(text, jsonb, text, text, uuid, uuid[], uuid[], jsonb, boolean, text) to service_role;
+grant execute on function private.canonical_jsonb(jsonb) to service_role;
+grant execute on function private.compute_training_hash(jsonb, uuid[], uuid[], text) to service_role;
+grant execute on function private.record_training_evaluation(jsonb, text, uuid, uuid[], uuid[], jsonb, boolean, text) to service_role;
 grant execute on function private.promote_model(uuid, uuid) to service_role;
+grant execute on function private.finalize_training_evaluation(uuid) to service_role;
+grant execute on function private.recover_abandoned_training_evaluations(integer, integer) to service_role;

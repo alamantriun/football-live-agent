@@ -202,17 +202,37 @@ class SupabaseGateway:
 
     def consumed_validation_ids(self, limit: int = 50000) -> set[UUID]:
         bounded_limit = self._cap(limit, 50000)
-        response = self._execute(
-            lambda: self._client.schema("private")
-            .table("consumed_validation_fixtures")
-            .select("fixture_id")
-            .order("fixture_id")
-            .limit(bounded_limit + 1)
-            .execute()
-        )
-        rows = self._rows(response)
-        if len(rows) > bounded_limit:
-            raise RepositoryUnavailable(PUBLIC_ERROR)
+        rows: list[dict] = []
+        offset = 0
+        page_size = 1000
+        while offset < bounded_limit:
+            requested = min(page_size, bounded_limit - offset)
+            response = self._execute(
+                lambda offset=offset, requested=requested: self._client.schema(
+                    "private"
+                )
+                .table("consumed_validation_fixtures")
+                .select("fixture_id")
+                .order("fixture_id")
+                .range(offset, offset + requested - 1)
+                .execute()
+            )
+            page = self._rows(response)
+            rows.extend(page)
+            if len(page) < requested:
+                break
+            offset += requested
+        else:
+            response = self._execute(
+                lambda: self._client.schema("private")
+                .table("consumed_validation_fixtures")
+                .select("fixture_id")
+                .order("fixture_id")
+                .range(bounded_limit, bounded_limit)
+                .execute()
+            )
+            if self._rows(response):
+                raise RepositoryUnavailable(PUBLIC_ERROR)
         try:
             return {UUID(str(row["fixture_id"])) for row in rows}
         except (KeyError, TypeError, ValueError) as exc:
@@ -231,9 +251,7 @@ class SupabaseGateway:
             .rpc(
                 "record_training_evaluation",
                 {
-                    "p_version": evaluation.version,
                     "p_parameters": evaluation.parameters,
-                    "p_parameter_hash": evaluation.parameter_hash,
                     "p_code_version": evaluation.code_version,
                     "p_previous_model_id": str(evaluation.previous_model_id),
                     "p_train_fixture_ids": [
@@ -251,15 +269,10 @@ class SupabaseGateway:
         )
         rows = self._rows(response)
         try:
-            row = rows[0]
-            status = "candidate" if row["decision"] == "running" else "rejected"
-            return TrainingRun(
-                id=row["id"],
-                candidate_model_id=row["candidate_model_id"],
-                status=status,
+            return self._training_run(
+                rows[0],
                 train_fixture_ids=evaluation.train_fixture_ids,
                 validation_fixture_ids=evaluation.validation_fixture_ids,
-                parameter_hash=evaluation.parameter_hash,
                 active_model_id=evaluation.previous_model_id,
             )
         except (IndexError, KeyError, TypeError, ValueError) as exc:
@@ -281,6 +294,80 @@ class SupabaseGateway:
         if not rows:
             raise RepositoryUnavailable(PUBLIC_ERROR)
         return ModelVersion.model_validate(rows[0])
+
+    @staticmethod
+    def _training_run(
+        row: dict,
+        *,
+        train_fixture_ids: tuple[UUID, ...] = (),
+        validation_fixture_ids: tuple[UUID, ...] = (),
+        active_model_id: UUID | None = None,
+    ) -> TrainingRun:
+        status_by_decision = {
+            "running": "candidate",
+            "rejected": "rejected",
+            "failed": "failed",
+            "succeeded": "promoted",
+        }
+        status = status_by_decision[row["decision"]]
+        candidate_model_id = UUID(str(row["candidate_model_id"]))
+        if not train_fixture_ids:
+            train_fixture_ids = tuple(
+                UUID(str(item)) for item in row.get("train_fixture_ids") or ()
+            )
+        if not validation_fixture_ids:
+            validation_fixture_ids = tuple(
+                UUID(str(item))
+                for item in row.get("validation_fixture_ids") or ()
+            )
+        if status == "promoted":
+            active_model_id = candidate_model_id
+        return TrainingRun(
+            id=row["id"],
+            candidate_model_id=candidate_model_id,
+            status=status,
+            train_fixture_ids=train_fixture_ids,
+            validation_fixture_ids=validation_fixture_ids,
+            parameter_hash=row["parameter_hash"],
+            active_model_id=active_model_id,
+        )
+
+    def finalize_training_evaluation(self, run_id: UUID) -> TrainingRun:
+        response = self._execute(
+            lambda: self._client.schema("private")
+            .rpc(
+                "finalize_training_evaluation",
+                {"p_run_id": str(run_id)},
+            )
+            .execute()
+        )
+        rows = self._rows(response)
+        try:
+            return self._training_run(rows[0])
+        except (IndexError, KeyError, TypeError, ValueError) as exc:
+            raise RepositoryUnavailable(PUBLIC_ERROR) from exc
+
+    def recover_abandoned_training_evaluations(
+        self, stale_after_seconds: int = 900, limit: int = 100
+    ) -> int:
+        response = self._execute(
+            lambda: self._client.schema("private")
+            .rpc(
+                "recover_abandoned_training_evaluations",
+                {
+                    "p_stale_after_seconds": stale_after_seconds,
+                    "p_limit": limit,
+                },
+            )
+            .execute()
+        )
+        rows = self._rows(response)
+        try:
+            for row in rows:
+                self._training_run(row)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RepositoryUnavailable(PUBLIC_ERROR) from exc
+        return len(rows)
 
     def public_live(self, limit: int, cursor: str | None) -> list[dict]:
         def query() -> Any:

@@ -72,6 +72,10 @@ class FakeQuery:
         self.operation["limit"] = value
         return self
 
+    def range(self, start, end):
+        self.operation["range"] = (start, end)
+        return self
+
     def execute(self):
         self.client.operations.append(self.operation)
         if self.client.failure is not None:
@@ -81,6 +85,14 @@ class FakeQuery:
             self.operation["kind"],
             self.operation["name"],
         )
+        if key in self.client.table_rows:
+            rows = self.client.table_rows[key]
+            start, requested_end = self.operation.get("range", (0, len(rows) - 1))
+            capped_end = min(
+                requested_end,
+                start + self.client.server_max_rows - 1,
+            )
+            return FakeResponse(rows[start : capped_end + 1])
         return FakeResponse(self.client.responses.get(key, []))
 
 
@@ -100,6 +112,8 @@ class FakeClient:
     def __init__(self):
         self.operations = []
         self.responses = {}
+        self.table_rows = {}
+        self.server_max_rows = 1000
         self.failure = None
 
     def schema(self, name):
@@ -731,7 +745,7 @@ def test_training_examples_use_private_bounded_explicit_projection(gateway, fake
 
 def test_consumed_validation_ids_use_service_only_bounded_view(gateway, fake_client):
     ids = [UUID(int=1), UUID(int=2)]
-    fake_client.responses[("private", "table", "consumed_validation_fixtures")] = [
+    fake_client.table_rows[("private", "table", "consumed_validation_fixtures")] = [
         {"fixture_id": str(item)} for item in ids
     ]
 
@@ -743,21 +757,59 @@ def test_consumed_validation_ids_use_service_only_bounded_view(gateway, fake_cli
         "params": None,
         "select": "fixture_id",
         "order": ("fixture_id", False),
-        "limit": 50001,
+        "range": (0, 999),
     }
 
 
-def test_consumed_validation_ids_fail_closed_instead_of_truncating(
+def test_consumed_validation_ids_pages_past_exact_server_cap_multiple(
     gateway, fake_client
 ):
-    fake_client.responses[("private", "table", "consumed_validation_fixtures")] = [
-        {"fixture_id": str(UUID(int=index))} for index in range(1, 4)
+    rows = [
+        {"fixture_id": str(UUID(int=index))} for index in range(1, 2001)
+    ]
+    fake_client.table_rows[
+        ("private", "table", "consumed_validation_fixtures")
+    ] = rows
+
+    assert gateway.consumed_validation_ids(limit=2000) == {
+        UUID(row["fixture_id"]) for row in rows
+    }
+    assert [operation["range"] for operation in fake_client.operations[-3:]] == [
+        (0, 999),
+        (1000, 1999),
+        (2000, 2000),
+    ]
+
+
+def test_consumed_validation_ids_fail_closed_past_total_bound(gateway, fake_client):
+    fake_client.table_rows[
+        ("private", "table", "consumed_validation_fixtures")
+    ] = [
+        {"fixture_id": str(UUID(int=index))} for index in range(1, 2002)
     ]
 
     with pytest.raises(RepositoryUnavailable):
-        gateway.consumed_validation_ids(limit=2)
+        gateway.consumed_validation_ids(limit=2000)
 
-    assert fake_client.operations[-1]["limit"] == 3
+    assert fake_client.operations[-1]["range"] == (2000, 2000)
+
+
+def test_consumed_validation_ids_never_read_past_fifty_thousand(
+    gateway, fake_client
+):
+    fake_client.table_rows[
+        ("private", "table", "consumed_validation_fixtures")
+    ] = [
+        {"fixture_id": str(UUID(int=index))} for index in range(1, 50002)
+    ]
+
+    with pytest.raises(RepositoryUnavailable):
+        gateway.consumed_validation_ids(limit=99999)
+
+    ranges = [operation["range"] for operation in fake_client.operations]
+    assert ranges[0] == (0, 999)
+    assert ranges[-2:] == [(49000, 49999), (50000, 50000)]
+    assert all(end - start + 1 <= 1000 for start, end in ranges)
 
 
 def test_training_evidence_and_promotion_use_exact_private_rpcs(
@@ -784,6 +836,7 @@ def test_training_evidence_and_promotion_use_exact_private_rpcs(
             "id": str(RUN_ID),
             "candidate_model_id": str(MODEL_ID),
             "decision": "running",
+            "parameter_hash": "a" * 64,
         }
     ]
     fake_client.responses[("private", "rpc", "promote_model")] = [model_row]
@@ -798,9 +851,7 @@ def test_training_evidence_and_promotion_use_exact_private_rpcs(
     assert record_operation["schema"] == "private"
     assert record_operation["name"] == "record_training_evaluation"
     assert record_operation["params"] == {
-        "p_version": evaluation.version,
         "p_parameters": evaluation.parameters,
-        "p_parameter_hash": evaluation.parameter_hash,
         "p_code_version": evaluation.code_version,
         "p_previous_model_id": str(MODEL_ID),
         "p_train_fixture_ids": [str(item) for item in train_ids],
@@ -821,4 +872,54 @@ def test_training_evidence_and_promotion_use_exact_private_rpcs(
             "p_candidate_id": str(MODEL_ID),
             "p_current_id": str(CURRENT_MODEL_ID),
         },
+    }
+
+
+def test_training_recovery_rpcs_map_terminal_state_and_use_safe_bounds(
+    gateway, fake_client
+):
+    fake_client.responses[("private", "rpc", "finalize_training_evaluation")] = [
+        {
+            "id": str(RUN_ID),
+            "candidate_model_id": str(MODEL_ID),
+            "decision": "succeeded",
+            "parameter_hash": "b" * 64,
+            "train_fixture_ids": [str(UUID(int=21))],
+            "validation_fixture_ids": [str(UUID(int=22))],
+        }
+    ]
+    fake_client.responses[
+        ("private", "rpc", "recover_abandoned_training_evaluations")
+    ] = [
+        {
+            "id": str(UUID(int=11)),
+            "candidate_model_id": str(UUID(int=12)),
+            "decision": "failed",
+            "parameter_hash": "c" * 64,
+        }
+    ]
+
+    finalized = gateway.finalize_training_evaluation(RUN_ID)
+    recovered = gateway.recover_abandoned_training_evaluations(
+        stale_after_seconds=900,
+        limit=100,
+    )
+
+    assert finalized.status == "promoted"
+    assert finalized.active_model_id == MODEL_ID
+    assert finalized.train_fixture_ids == (UUID(int=21),)
+    assert finalized.validation_fixture_ids == (UUID(int=22),)
+    assert recovered == 1
+    finalize_operation, recover_operation = fake_client.operations[-2:]
+    assert finalize_operation == {
+        "schema": "private",
+        "kind": "rpc",
+        "name": "finalize_training_evaluation",
+        "params": {"p_run_id": str(RUN_ID)},
+    }
+    assert recover_operation == {
+        "schema": "private",
+        "kind": "rpc",
+        "name": "recover_abandoned_training_evaluations",
+        "params": {"p_stale_after_seconds": 900, "p_limit": 100},
     }

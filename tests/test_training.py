@@ -139,7 +139,7 @@ def test_candidate_is_evaluated_against_same_later_holdout():
     assert decision.parameters["factores"] == {"local": 1.6, "visitante": 0.6}
 
 
-def test_canonical_hash_sorts_parameters_but_preserves_evidence_order():
+def test_canonical_hash_sorts_parameters_and_both_evidence_id_sets():
     train_ids = [UUID(int=1), UUID(int=2)]
     validation_ids = [UUID(int=3), UUID(int=4)]
     first = canonical_candidate_hash(
@@ -157,10 +157,10 @@ def test_canonical_hash_sorts_parameters_but_preserves_evidence_order():
 
     assert first == same
     assert len(first) == 64
-    assert first != canonical_candidate_hash(
+    assert first == canonical_candidate_hash(
         {"z": 1, "factores": {"visitante": 0.9, "local": 1.1}},
         list(reversed(train_ids)),
-        validation_ids,
+        list(reversed(validation_ids)),
         "abc123",
     )
     assert first != canonical_candidate_hash(
@@ -178,6 +178,15 @@ class FakeTrainingRepository:
         self.consumed = set()
         self.events = []
         self.evaluations: list[CandidateEvaluation] = []
+        self.promotion_outcome = "success"
+
+    def recover_abandoned_training_evaluations(
+        self, stale_after_seconds=900, limit=100
+    ):
+        self.events.append("recover_abandoned")
+        assert stale_after_seconds == 900
+        assert limit == 100
+        return 0
 
     def training_examples(self, limit=1000):
         return self.examples[:limit]
@@ -206,10 +215,33 @@ class FakeTrainingRepository:
         self.events.append("promote")
         assert candidate_id == CANDIDATE_ID
         assert current_id == ACTIVE_ID
+        if self.promotion_outcome == "uncommitted":
+            raise TimeoutError("promotion response was uncertain")
         self.model = self.model.model_copy(
             update={"id": candidate_id, "version": "promoted", "state": "active"}
         )
+        if self.promotion_outcome == "committed":
+            raise TimeoutError("promotion committed before transport failed")
         return self.model
+
+    def finalize_training_evaluation(self, run_id):
+        self.events.append("finalize")
+        assert run_id == RUN_ID
+        if self.promotion_outcome == "committed":
+            return TrainingRun(
+                id=RUN_ID,
+                candidate_model_id=CANDIDATE_ID,
+                status="promoted",
+                parameter_hash=self.evaluations[0].parameter_hash,
+                active_model_id=CANDIDATE_ID,
+            )
+        return TrainingRun(
+            id=RUN_ID,
+            candidate_model_id=CANDIDATE_ID,
+            status="failed",
+            parameter_hash=self.evaluations[0].parameter_hash,
+            active_model_id=ACTIVE_ID,
+        )
 
 
 def test_service_persists_immutable_candidate_before_promotion():
@@ -221,7 +253,7 @@ def test_service_persists_immutable_candidate_before_promotion():
     result = TrainingService().run(repository, code_version="abc123")
 
     assert result.status == "promoted"
-    assert repository.events == ["record", "promote"]
+    assert repository.events == ["recover_abandoned", "record", "promote"]
     evaluation = repository.evaluations[0]
     assert evaluation.approved is True
     assert evaluation.version == f"live-fit-{evaluation.parameter_hash[:12]}"
@@ -238,10 +270,52 @@ def test_rejected_candidate_and_run_consume_the_holdout_without_promotion():
     result = TrainingService().run(repository, code_version="abc123")
 
     assert result.status == "rejected"
-    assert repository.events == ["record"]
+    assert repository.events == ["recover_abandoned", "record"]
     assert repository.evaluations[0].approved is False
     assert set(result.validation_fixture_ids) <= repository.consumed
 
     second = TrainingService().run(repository, code_version="abc123")
     assert second.status == "collecting"
-    assert repository.events == ["record"]
+    assert repository.events == [
+        "recover_abandoned",
+        "record",
+        "recover_abandoned",
+    ]
+
+
+def test_service_recognizes_promotion_committed_before_uncertain_response():
+    repository = FakeTrainingRepository(
+        make_examples(),
+        make_active({"local": 0.6, "visitante": 0.6}),
+    )
+    repository.promotion_outcome = "committed"
+
+    result = TrainingService().run(repository, code_version="abc123")
+
+    assert result.status == "promoted"
+    assert result.active_model_id == CANDIDATE_ID
+    assert repository.events == [
+        "recover_abandoned",
+        "record",
+        "promote",
+        "finalize",
+    ]
+
+
+def test_service_finalizes_uncommitted_candidate_after_promotion_exception():
+    repository = FakeTrainingRepository(
+        make_examples(),
+        make_active({"local": 0.6, "visitante": 0.6}),
+    )
+    repository.promotion_outcome = "uncommitted"
+
+    result = TrainingService().run(repository, code_version="abc123")
+
+    assert result.status == "failed"
+    assert result.active_model_id == ACTIVE_ID
+    assert repository.events == [
+        "recover_abandoned",
+        "record",
+        "promote",
+        "finalize",
+    ]

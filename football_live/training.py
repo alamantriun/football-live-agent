@@ -91,11 +91,11 @@ class CandidateEvaluation(TrainingDecision):
 class TrainingRun(StrictDomainModel):
     id: UUID | None = None
     candidate_model_id: UUID | None = None
-    status: Literal["collecting", "candidate", "rejected", "promoted"]
+    status: Literal["collecting", "candidate", "rejected", "failed", "promoted"]
     train_fixture_ids: tuple[UUID, ...] = ()
     validation_fixture_ids: tuple[UUID, ...] = ()
     parameter_hash: str | None = None
-    active_model_id: UUID
+    active_model_id: UUID | None = None
 
 
 class TrainingRepository(Protocol):
@@ -105,11 +105,17 @@ class TrainingRepository(Protocol):
 
     def active_model(self) -> ModelVersion: ...
 
+    def recover_abandoned_training_evaluations(
+        self, stale_after_seconds: int = 900, limit: int = 100
+    ) -> int: ...
+
     def record_training_evaluation(
         self, evaluation: CandidateEvaluation
     ) -> TrainingRun: ...
 
     def promote_model(self, candidate_id: UUID, current_id: UUID) -> ModelVersion: ...
+
+    def finalize_training_evaluation(self, run_id: UUID) -> TrainingRun: ...
 
 
 def build_chronological_split(
@@ -278,8 +284,10 @@ def canonical_candidate_hash(
 ) -> str:
     payload = {
         "parameters": parameters,
-        "train_fixture_ids": [str(item) for item in train_fixture_ids],
-        "validation_fixture_ids": [str(item) for item in validation_fixture_ids],
+        "train_fixture_ids": sorted(str(item) for item in train_fixture_ids),
+        "validation_fixture_ids": sorted(
+            str(item) for item in validation_fixture_ids
+        ),
         "code_version": code_version,
     }
     canonical = json.dumps(
@@ -296,6 +304,10 @@ class TrainingService:
     def run(self, repository: TrainingRepository, code_version: str) -> TrainingRun:
         if not code_version.strip():
             raise ValueError("code_version is required")
+        repository.recover_abandoned_training_evaluations(
+            stale_after_seconds=900,
+            limit=100,
+        )
         active = repository.active_model()
         examples = repository.training_examples()
         consumed = repository.consumed_validation_ids()
@@ -326,7 +338,15 @@ class TrainingService:
             return recorded
         if recorded.candidate_model_id is None:
             raise RuntimeError("persisted candidate ID is required for promotion")
-        promoted = repository.promote_model(recorded.candidate_model_id, active.id)
+        try:
+            promoted = repository.promote_model(recorded.candidate_model_id, active.id)
+        except Exception as promotion_error:
+            if recorded.id is None:
+                raise
+            try:
+                return repository.finalize_training_evaluation(recorded.id)
+            except Exception:
+                raise promotion_error
         return recorded.model_copy(
             update={"status": "promoted", "active_model_id": promoted.id}
         )

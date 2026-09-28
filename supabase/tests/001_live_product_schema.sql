@@ -56,6 +56,11 @@ select throws_ok(
 );
 reset role;
 
+-- Task 2 deliberately mutates malformed evidence to exercise promotion guards.
+-- Production keeps both triggers enabled; only this rollback-only fixture disables them.
+alter table private.model_versions disable trigger model_versions_immutable_evidence;
+alter table private.training_runs disable trigger training_runs_immutable_evidence;
+
 set local role service_role;
 
 select
@@ -529,5 +534,7 @@ select is(
 );
 
 reset role;
+alter table private.model_versions enable trigger model_versions_immutable_evidence;
+alter table private.training_runs enable trigger training_runs_immutable_evidence;
 select * from finish();
 rollback;
