@@ -1,3 +1,4 @@
+import asyncio
 import inspect
 import json
 from datetime import datetime, timezone
@@ -12,7 +13,6 @@ from football_live.provider import (
     ProviderClient,
     ProviderUnavailable,
 )
-from football_live.settings import get_settings
 
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "365scores"
@@ -27,7 +27,101 @@ async def no_sleep(_delay: float) -> None:
     return None
 
 
-def test_client_uses_fixed_timeout_and_bounded_connection_pool(monkeypatch):
+class VirtualClock:
+    def __init__(self, now: float) -> None:
+        self.now = now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+class AdvancingJsonStream(httpx.AsyncByteStream):
+    def __init__(self, body: bytes, clock: VirtualClock, elapsed: float) -> None:
+        self._body = body
+        self._clock = clock
+        self._elapsed = elapsed
+        self.completed = False
+
+    async def __aiter__(self):
+        self._clock.advance(self._elapsed)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        self.completed = True
+        yield self._body
+
+
+def install_virtual_clock(monkeypatch) -> tuple[VirtualClock, float]:
+    loop = asyncio.get_running_loop()
+    started_at = loop.time()
+    clock = VirtualClock(started_at)
+    monkeypatch.setattr(loop, "time", lambda: clock.now)
+    return clock, started_at
+
+
+@pytest.mark.asyncio
+async def test_total_deadline_includes_retry_backoff(monkeypatch):
+    clock, started_at = install_virtual_clock(monkeypatch)
+    attempts = 0
+    delays: list[float] = []
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(503)
+
+    async def advance_backoff(delay: float) -> None:
+        delays.append(delay)
+        clock.advance(6.1)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    async with ProviderClient(
+        transport=httpx.MockTransport(handler),
+        sleep=advance_backoff,
+        jitter=lambda: 0.0,
+    ) as client:
+        with pytest.raises(ProviderUnavailable, match="^provider unavailable$"):
+            await client.list_live()
+
+    assert attempts == 2
+    assert len(delays) == 2
+    assert clock.now - started_at == pytest.approx(12.2)
+
+
+@pytest.mark.asyncio
+async def test_snapshot_deadline_spans_both_slow_streaming_responses(monkeypatch):
+    clock, started_at = install_virtual_clock(monkeypatch)
+    partial = load_fixture("game_partial.json")
+    requests: list[httpx.Request] = []
+    streams: list[AdvancingJsonStream] = []
+
+    def response(payload: dict, elapsed: float) -> httpx.Response:
+        stream = AdvancingJsonStream(json.dumps(payload).encode(), clock, elapsed)
+        streams.append(stream)
+        return httpx.Response(200, stream=stream)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/web/game/":
+            return response({"game": partial["game"]}, 7.0)
+        if request.url.path == "/web/game/stats/":
+            return response({"statistics": partial["statistics"]}, 6.0)
+        return httpx.Response(404)
+
+    async with ProviderClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(ProviderUnavailable, match="^provider unavailable$"):
+            await client.get_snapshot("123456789")
+
+    assert [request.url.path for request in requests] == [
+        "/web/game/",
+        "/web/game/stats/",
+    ]
+    assert clock.now - started_at == pytest.approx(13.0)
+    assert streams[0].completed is True
+    assert streams[1].completed is False
+
+
+def test_client_constructs_fixed_outbound_transport(monkeypatch):
     captured: dict = {}
 
     class StubAsyncClient:
@@ -37,18 +131,16 @@ def test_client_uses_fixed_timeout_and_bounded_connection_pool(monkeypatch):
         captured.update(kwargs)
         return StubAsyncClient()
 
-    monkeypatch.setenv("PROVIDER_TIMEOUT_SECONDS", "99")
-    get_settings.cache_clear()
     monkeypatch.setattr(provider_module.httpx, "AsyncClient", capture_async_client)
 
     ProviderClient()
 
     timeout = captured["timeout"]
     limits = captured["limits"]
+    assert "client" not in inspect.signature(ProviderClient).parameters
+    assert captured["base_url"] == "https://webws.365scores.com/web/"
+    assert captured["follow_redirects"] is False
     assert timeout.connect == 5.0
-    assert timeout.read == 12.0
-    assert timeout.write == 12.0
-    assert timeout.pool == 12.0
     assert limits.max_connections == 10
     assert limits.max_keepalive_connections == 5
 
@@ -132,6 +224,25 @@ async def test_provider_id_is_rejected_before_network(invalid_id: str):
             await client.get_snapshot(invalid_id)
 
     assert calls == 0
+
+
+@pytest.mark.asyncio
+async def test_snapshot_rejects_mismatched_game_id_before_stats_request():
+    partial = load_fixture("game_partial.json")
+    mismatched_game = {**partial["game"], "id": 987654321}
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/web/game/":
+            return httpx.Response(200, json={"game": mismatched_game})
+        return httpx.Response(200, json={"statistics": partial["statistics"]})
+
+    async with ProviderClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(ProviderUnavailable, match="^provider unavailable$"):
+            await client.get_snapshot("123456789")
+
+    assert [request.url.path for request in requests] == ["/web/game/"]
 
 
 @pytest.mark.asyncio

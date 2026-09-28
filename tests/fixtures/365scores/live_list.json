@@ -7,14 +7,10 @@
       "startTime": "2026-09-24T20:00:00Z",
       "competitionDisplayName": "Liga de prueba",
       "homeCompetitor": {
-        "id": 11,
-        "name": "Club Norte",
-        "score": 1
+        "name": "Club Norte"
       },
       "awayCompetitor": {
-        "id": 22,
-        "name": "Club Sur",
-        "score": 0
+        "name": "Club Sur"
       }
     }
   ]

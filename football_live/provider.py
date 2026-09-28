@@ -337,37 +337,28 @@ class ProviderClient:
     def __init__(
         self,
         *,
-        client: httpx.AsyncClient | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
         max_response_bytes: int = MAX_RESPONSE_BYTES,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         jitter: Callable[[], float] = random.random,
         adapter: ProviderAdapter | None = None,
     ) -> None:
-        if client is not None and transport is not None:
-            raise ValueError("inject either client or transport, not both")
         if max_response_bytes < 1:
             raise ValueError("max_response_bytes must be positive")
-        self._owns_client = client is None
-        if client is not None:
-            if str(client.base_url) != PROVIDER_BASE_URL:
-                raise ValueError("injected client must use the fixed provider base URL")
-            self._client = client
-        else:
-            self._client = httpx.AsyncClient(
-                base_url=PROVIDER_BASE_URL,
-                headers=_HEADERS,
-                timeout=httpx.Timeout(
-                    TOTAL_TIMEOUT_SECONDS,
-                    connect=CONNECT_TIMEOUT_SECONDS,
-                ),
-                limits=httpx.Limits(
-                    max_connections=MAX_CONNECTIONS,
-                    max_keepalive_connections=MAX_KEEPALIVE_CONNECTIONS,
-                ),
-                follow_redirects=False,
-                transport=transport,
-            )
+        self._client = httpx.AsyncClient(
+            base_url=PROVIDER_BASE_URL,
+            headers=_HEADERS,
+            timeout=httpx.Timeout(
+                TOTAL_TIMEOUT_SECONDS,
+                connect=CONNECT_TIMEOUT_SECONDS,
+            ),
+            limits=httpx.Limits(
+                max_connections=MAX_CONNECTIONS,
+                max_keepalive_connections=MAX_KEEPALIVE_CONNECTIONS,
+            ),
+            follow_redirects=False,
+            transport=transport,
+        )
         self._max_response_bytes = max_response_bytes
         self._sleep = sleep
         self._jitter = jitter
@@ -380,40 +371,51 @@ class ProviderClient:
         await self.aclose()
 
     async def aclose(self) -> None:
-        if self._owns_client:
-            await self._client.aclose()
+        await self._client.aclose()
 
     async def list_live(self) -> list[ProviderFixture]:
-        today = datetime.now().strftime("%d/%m/%Y")
-        payload = await self._request_json(
-            LIVE_LIST_PATH,
-            {"sports": "1", "startDate": today, "endDate": today},
-        )
         try:
-            return self._adapter.parse_live_list(payload)
+            async with asyncio.timeout(TOTAL_TIMEOUT_SECONDS):
+                today = datetime.now().strftime("%d/%m/%Y")
+                payload = await self._request_json(
+                    LIVE_LIST_PATH,
+                    {"sports": "1", "startDate": today, "endDate": today},
+                )
+                return self._adapter.parse_live_list(payload)
         except ProviderUnavailable:
             raise
+        except TimeoutError:
+            raise ProviderUnavailable("provider unavailable") from None
         except Exception:
             raise ProviderUnavailable("provider unavailable") from None
 
     async def get_snapshot(self, provider_fixture_id: str) -> ProviderSnapshot:
         self._validate_fixture_id(provider_fixture_id)
-        game_payload = await self._request_json(
-            GAME_PATH,
-            {"gameId": provider_fixture_id, "topBookmaker": "14"},
-        )
-        stats_payload = await self._request_json(
-            GAME_STATS_PATH,
-            {"games": provider_fixture_id},
-        )
-        combined = {
-            "game": game_payload.get("game"),
-            "statistics": stats_payload.get("statistics"),
-        }
         try:
-            return self._adapter.parse_snapshot(combined)
+            async with asyncio.timeout(TOTAL_TIMEOUT_SECONDS):
+                game_payload = await self._request_json(
+                    GAME_PATH,
+                    {"gameId": provider_fixture_id, "topBookmaker": "14"},
+                )
+                game = game_payload.get("game")
+                if (
+                    not isinstance(game, dict)
+                    or str(game.get("id") or "") != provider_fixture_id
+                ):
+                    raise ProviderUnavailable("provider unavailable")
+                stats_payload = await self._request_json(
+                    GAME_STATS_PATH,
+                    {"games": provider_fixture_id},
+                )
+                combined = {
+                    "game": game,
+                    "statistics": stats_payload.get("statistics"),
+                }
+                return self._adapter.parse_snapshot(combined)
         except ProviderUnavailable:
             raise
+        except TimeoutError:
+            raise ProviderUnavailable("provider unavailable") from None
         except Exception:
             raise ProviderUnavailable("provider unavailable") from None
 
