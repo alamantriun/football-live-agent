@@ -206,3 +206,15 @@ def test_missing_required_minute_is_suspended(service, snapshot, active_model):
 
     assert result.quality == "suspended"
     assert result.probabilities == {}
+
+
+@pytest.mark.parametrize("field", ["score_home", "score_away"])
+def test_missing_required_score_is_suspended(
+    service, snapshot, active_model, field
+):
+    impossible = snapshot.model_copy(update={field: None})
+
+    result = service.predict(impossible, active_model)
+
+    assert result.quality == "suspended"
+    assert result.probabilities == {}

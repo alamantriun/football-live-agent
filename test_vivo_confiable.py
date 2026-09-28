@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from calidad_vivo import evaluar
-from dashboard_web import empaquetar_estado, construir_serie_temporal
+from dashboard_web import empaquetar_estado, construir_serie_temporal, evaluar_calidad
 from extractor_365scores import _parsear_estadisticas
 from simulador import correr
 
@@ -19,6 +19,44 @@ def test_cobertura_no_inventa_estadisticas_y_detecta_datos_viejos():
     assert evaluar(ev, ahora)["vigente"]
     assert not evaluar(ev, ahora + timedelta(seconds=61))["vigente"]
     assert evaluar(ev, ahora)["disponibles"] == ["tiros_puerta"]
+
+
+def test_evaluar_calidad_suspende_minuto_requerido_ausente():
+    ev = evento()
+    ahora = datetime.fromisoformat(ev["timestamp"])
+    ev["minuto"] = None
+
+    calidad = evaluar_calidad(ev, ahora)
+
+    assert calidad["vigente"] is False
+    assert calidad["basicos_validos"] is False
+    assert calidad.get("frescura") == "suspended"
+    assert calidad["estado"] == "suspendido"
+
+
+def test_evaluar_calidad_suspende_score_requerido_ausente():
+    ev = evento()
+    ahora = datetime.fromisoformat(ev["timestamp"])
+    ev["marcador"] = {"local": 1}
+
+    calidad = evaluar_calidad(ev, ahora)
+
+    assert calidad["vigente"] is False
+    assert calidad["basicos_validos"] is False
+    assert calidad.get("frescura") == "suspended"
+    assert calidad["estado"] == "suspendido"
+
+
+def test_evaluar_calidad_mantiene_estadisticas_opcionales_ausentes_degradadas():
+    ev = evento()
+    ahora = datetime.fromisoformat(ev["timestamp"])
+
+    calidad = evaluar_calidad(ev, ahora)
+
+    assert calidad["basicos_validos"] is True
+    assert calidad["vigente"] is True
+    assert calidad.get("frescura") == "degraded"
+    assert calidad["estado"] == "actualizado"
 
 
 def test_no_se_publica_prediccion_vieja_o_previa_a_un_gol():

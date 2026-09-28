@@ -39,16 +39,30 @@ def evaluar(evento, ahora=None):
         (evento.get(campo) or {}).get(equipo) is not None for equipo in ("local", "visitante"))]
     basicos = evento.get("minuto") is not None and all(
         (evento.get("marcador") or {}).get(equipo) is not None for equipo in ("local", "visitante"))
-    completeness = "fresh" if basicos and len(disponibles) == len(campos) else "degraded"
+    if not basicos:
+        completeness = "suspended"
+    elif len(disponibles) == len(campos):
+        completeness = "fresh"
+    else:
+        completeness = "degraded"
     frescura = (
         classify_freshness(recibido, ahora, completeness)
         if edad is not None
         else "suspended"
     )
     vigente = frescura in ("fresh", "degraded")
+    estado = (
+        "sin_datos"
+        if edad is None
+        else "suspendido"
+        if frescura == "suspended"
+        else "retrasado"
+        if not vigente
+        else "actualizado"
+    )
     return {"edad_segundos": round(edad, 1) if edad is not None else None,
             "vigente": vigente, "basicos_validos": basicos,
-            "estado": "sin_datos" if edad is None else "retrasado" if not vigente else "actualizado",
+            "frescura": frescura, "estado": estado,
             "cobertura": round(100 * len(disponibles) / len(campos)),
             "disponibles": disponibles, "ausentes": [c for c in campos if c not in disponibles],
             "fuente": evento.get("_fuente", "Sin proveedor"),

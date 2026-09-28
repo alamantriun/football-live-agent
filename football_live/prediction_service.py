@@ -133,7 +133,13 @@ class PredictionService:
             raise ValueError("active model is required")
 
         now = self._clock()
-        impossible = snapshot.minute is None or snapshot.minute > 120 or _is_closed(snapshot)
+        impossible = (
+            snapshot.minute is None
+            or snapshot.minute > 120
+            or snapshot.score_home is None
+            or snapshot.score_away is None
+            or _is_closed(snapshot)
+        )
         if impossible or snapshot.quality == DataStatus.SUSPENDED:
             completeness: str = "suspended"
         elif snapshot.quality == DataStatus.STALE:
