@@ -50,11 +50,12 @@ def correr(eventos_recientes, minuto_actual, marcador_actual, seed=SEED,
     if min(multiplicadores) < .6:
         raise ValueError("Factor aprendido fuera del rango validado")
     tasas = [t * f for t, f in zip(tasas, multiplicadores)]
+    ajustadas = {"local": tasas[0]*restante, "visitante": tasas[1]*restante}
     resultado = predecir(tasas[0] * restante, tasas[1] * restante,
                          marcador_actual, seed, N_ITERACIONES)
     ventana = min(10.0, restante)
     resultado.update(tiempo_restante=restante, tasa_ataques_local=tasas[0],
-                     lambda_base=bases,
+                     lambda_base=bases, lambda_ajustada=ajustadas,
                      factores_aplicados=dict(zip(("local", "visitante"), multiplicadores)),
                      modelo_version=ajuste.get("version", "live-poisson-2") if ajuste.get("aprobado") else "live-poisson-2",
                      tasa_ataques_visitante=tasas[1], fuentes_tasa=fuentes,
