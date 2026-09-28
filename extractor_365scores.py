@@ -13,10 +13,16 @@ import asyncio
 import json
 import logging
 import os
-import re
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+
+from football_live.provider import (
+    parse_minute as _provider_parse_minute,
+    parse_number as _provider_parse_number,
+    parse_score as _provider_parse_score,
+    parse_statistics_legacy as _provider_parse_statistics_legacy,
+)
 
 logging.basicConfig(format="[%(asctime)s] [%(name)s] %(message)s")
 logger = logging.getLogger("extractor_365scores")
@@ -71,14 +77,9 @@ def _evento_nulo() -> dict:
     }
 
 
-def _parse_num(val) -> float:
-    if val is None:
-        return 0.0
-    s = str(val).replace("%", "").strip()
-    try:
-        return float(s)
-    except ValueError:
-        return 0.0
+def _parse_num(val) -> float | None:
+    """Compatibility wrapper that preserves missingness."""
+    return _provider_parse_number(val)
 
 
 def _api_url(path: str, **extra) -> str:
@@ -134,23 +135,11 @@ def _es_vivo(game: dict) -> bool:
 
 
 def _minuto_desde_juego(game: dict) -> float | None:
-    precise = game.get("preciseGameTime") or {}
-    if isinstance(precise, dict) and precise.get("minutes") is not None:
-        return float(precise["minutes"])
-    if game.get("gameTime") is not None:
-        return float(game["gameTime"])
-    display = str(game.get("gameTimeDisplay") or "")
-    m = re.search(r"(\d+)", display)
-    return float(m.group(1)) if m else None
+    return _provider_parse_minute(game)
 
 
 def _marcador_desde_juego(game: dict) -> tuple[int | None, int | None]:
-    home = game.get("homeCompetitor") or {}
-    away = game.get("awayCompetitor") or {}
-    hs, as_ = home.get("score"), away.get("score")
-    if hs is None or as_ is None or hs < 0 or as_ < 0:
-        return None, None
-    return int(_parse_num(hs)), int(_parse_num(as_))
+    return _provider_parse_score(game)
 
 
 def _evento_desde_listado(game: dict) -> dict | None:
@@ -239,42 +228,8 @@ async def listar_partidos_vivo(page=None) -> list[dict]:
 
 
 def _parsear_estadisticas(stats_data: dict | None, home_id: int, away_id: int) -> dict:
-    stats = {
-        "posesion": {"local": None, "visitante": None},
-        "tiros": {"local": None, "visitante": None},
-        "tiros_puerta": {"local": None, "visitante": None},
-        "saques_esquina": {"local": None, "visitante": None},
-        "tarjetas_amarillas": {"local": None, "visitante": None},
-        "tarjetas_rojas": {"local": None, "visitante": None},
-        "faltas": {"local": None, "visitante": None},
-        "fueras_juego": {"local": None, "visitante": None},
-        "xg": {"local": None, "visitante": None},
-    }
-    if not stats_data:
-        return stats
-
-    acumulado: dict[str, dict[str, float]] = {}
-    for item in stats_data.get("statistics") or []:
-        nombre = (item.get("name") or item.get("categoryName") or "").lower().strip()
-        clave = STAT_MAP.get(nombre)
-        if not clave or clave not in stats:
-            continue
-        cid = item.get("competitorId")
-        lado = "local" if cid == home_id else "visitante" if cid == away_id else None
-        if not lado:
-            continue
-        raw = str(item.get("value") if item.get("value") is not None else "").strip()
-        if not re.fullmatch(r"\d+(?:[.,]\d+)?%?", raw):
-            continue
-        acumulado.setdefault(clave, {})[lado] = float(raw.rstrip("%").replace(",", "."))
-
-    for clave, valores in acumulado.items():
-        for lado, val in valores.items():
-            if clave in {"posesion", "xg"}:
-                stats[clave][lado] = val
-            else:
-                stats[clave][lado] = int(val)
-    return stats
+    """Compatibility wrapper around the canonical pure parser."""
+    return _provider_parse_statistics_legacy(stats_data, home_id, away_id)
 
 
 def _mapa_jugadores(game: dict) -> dict[int, str]:

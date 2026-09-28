@@ -1,0 +1,49 @@
+{
+  "game": {
+    "id": 123456789,
+    "statusText": "2º Tiempo",
+    "gameTime": 63,
+    "homeCompetitor": {
+      "id": 11,
+      "name": "Club Norte",
+      "score": 1
+    },
+    "awayCompetitor": {
+      "id": 22,
+      "name": "Club Sur",
+      "score": 0
+    }
+  },
+  "statistics": [
+    {
+      "name": "possession",
+      "competitorId": 11,
+      "value": "55%"
+    },
+    {
+      "name": "total shots",
+      "competitorId": 11,
+      "value": "8"
+    },
+    {
+      "name": "total shots",
+      "competitorId": 22,
+      "value": "3"
+    },
+    {
+      "name": "shots on target",
+      "competitorId": 11,
+      "value": "4"
+    },
+    {
+      "name": "expected goals",
+      "competitorId": 11,
+      "value": "1.37"
+    },
+    {
+      "name": "expected goals",
+      "competitorId": 22,
+      "value": "0"
+    }
+  ]
+}
