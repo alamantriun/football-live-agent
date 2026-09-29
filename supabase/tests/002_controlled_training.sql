@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(67);
+select plan(71);
 
 select has_view('private', 'training_examples', 'training example projection exists');
 select has_table('private', 'consumed_validation_fixtures', 'validation consumption ledger exists');
@@ -23,6 +23,53 @@ select has_function(
   'recover_abandoned_training_evaluations',
   array['integer', 'integer'],
   'bounded stale-run recovery RPC exists'
+);
+select ok(
+  (select not prosecdef
+          and provolatile = 'i'
+          and proisstrict
+          and proparallel = 's'
+          and 'search_path=""' = any(coalesce(proconfig, array[]::text[]))
+   from pg_proc
+   where oid = 'private.compute_training_hash(jsonb,uuid[],uuid[],text)'::regprocedure),
+  'training hash is immutable, strict, parallel safe, SECURITY INVOKER, and empty-search-path'
+);
+select ok(
+  (select position('extensions.digest(' in prosrc) > 0
+          and position('public.digest(' in prosrc) = 0
+   from pg_proc
+   where oid = 'private.compute_training_hash(jsonb,uuid[],uuid[],text)'::regprocedure),
+  'training hash binds digest to the pgcrypto extensions schema'
+);
+select is(
+  private.compute_training_hash(
+    '{"b":2,"a":1}',
+    array[
+      '00000000-0000-0000-0000-000000000002',
+      '00000000-0000-0000-0000-000000000001'
+    ]::uuid[],
+    array[
+      '00000000-0000-0000-0000-000000000004',
+      '00000000-0000-0000-0000-000000000003'
+    ]::uuid[],
+    'schema-fix'
+  ),
+  '5d18e7032342bdeb284aa34cd252e7e3bc3483193e2baa48d2c294e6077a4350',
+  'training hash executes pgcrypto digest and remains canonical'
+);
+select ok(
+  has_function_privilege('service_role', 'private.compute_training_hash(jsonb,uuid[],uuid[],text)', 'EXECUTE')
+  and not has_function_privilege('anon', 'private.compute_training_hash(jsonb,uuid[],uuid[],text)', 'EXECUTE')
+  and not has_function_privilege('authenticated', 'private.compute_training_hash(jsonb,uuid[],uuid[],text)', 'EXECUTE')
+  and not exists (
+    select 1
+    from pg_proc as procedures
+    cross join lateral aclexplode(coalesce(procedures.proacl, acldefault('f', procedures.proowner))) as grants
+    where procedures.oid = 'private.compute_training_hash(jsonb,uuid[],uuid[],text)'::regprocedure
+      and grants.grantee = 0
+      and grants.privilege_type = 'EXECUTE'
+  ),
+  'training hash execute is granted only to service_role'
 );
 
 select ok(

@@ -174,7 +174,7 @@ begin
     ), '[]'::jsonb)
   ));
 
-  return encode(public.digest(convert_to(v_payload, 'UTF8'), 'sha256'), 'hex');
+  return encode(extensions.digest(convert_to(v_payload, 'UTF8'), 'sha256'), 'hex');
 end;
 $$;
 

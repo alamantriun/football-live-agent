@@ -397,3 +397,125 @@ supabase: The term 'supabase' is not recognized as a name of a cmdlet, function,
 ### Remaining concern
 
 Python behavior and static SQL contracts are verified locally. The 67 pgTAP assertions still require execution in an approved isolated Supabase/PostgreSQL test environment before the unapplied migration is promoted.
+
+## Fix round 3/5 - bind training hash to the pgcrypto schema
+
+### Root cause and outcome
+
+The applied Task 6 migration defined `private.compute_training_hash` with an empty `search_path` but called `public.digest(bytea,text)`. The live Supabase project has pgcrypto's `digest` in the `extensions` schema, so `record_training_evaluation` failed deterministically with SQLSTATE `42883` when it reached hash generation.
+
+The repair is deliberately narrow:
+
+- the original `20260928153000_add_controlled_training.sql` now calls `extensions.digest` so clean installs are correct;
+- because that migration is already applied remotely, a forward-only `20260929155047_fix_training_hash_schema.sql` recreates only `private.compute_training_hash` and restores its exact execute revokes/service-role grant;
+- the repair preserves `SECURITY INVOKER`, `IMMUTABLE`, `STRICT`, `PARALLEL SAFE`, and an empty `search_path`;
+- pgTAP now checks the bound schema from `pg_proc.prosrc`, executes a fixed canonical hash example, verifies function attributes, and verifies service-role-only execution.
+
+The Supabase CLI was unavailable, so `supabase migration new fix_training_hash_schema` could not be used. The fallback filename uses the next local timestamp captured before creation: `20260929155047_fix_training_hash_schema.sql`.
+
+### RED evidence
+
+Before changing either migration, the new static contract failed for both required installation paths:
+
+```text
+python -m pytest tests/test_sql_migrations.py -q
+FF                                                                       [100%]
+
+20260928153000_add_controlled_training.sql:
+assert 'extensions.digest(' in definition.group()
+definition contained public.digest(...)
+
+20260929155047_fix_training_hash_schema.sql:
+AssertionError: missing migration: 20260929155047_fix_training_hash_schema.sql
+
+2 failed in 0.10s
+```
+
+This reproduces the confirmed remote failure contract without accessing the remote project: the installed function references a nonexistent `public.digest`, yielding SQLSTATE `42883` during `record_training_evaluation`.
+
+### GREEN evidence
+
+Focused regression after the minimal fix:
+
+```text
+python -m pytest tests/test_sql_migrations.py -q
+2 passed in 0.01s
+```
+
+Directed learning, repository, SQL-migration, probabilistic-model, and live-quality regressions:
+
+```text
+$env:PYTHONPATH=(Resolve-Path 'work/packages').Path
+python -m pytest tests/test_sql_migrations.py tests/test_training.py tests/test_repository.py test_modelo_probabilistico.py test_vivo_confiable.py -q
+95 passed in 1.33s
+```
+
+Filtered full suite, excluding only the permitted unchanged legacy `tmp_path` test:
+
+```text
+$env:PYTHONPATH=(Resolve-Path 'work/packages').Path
+python -m pytest -q -k "not test_registro_no_cuenta_repeticiones_ni_predicciones_finales"
+153 passed, 1 deselected in 7.03s
+```
+
+Unfiltered full suite:
+
+```text
+$env:PYTHONPATH=(Resolve-Path 'work/packages').Path
+python -m pytest -q
+154 passed in 7.20s
+```
+
+Static migration and SQL checks:
+
+```text
+assertions=71
+pgtap_plan_matches=True
+balanced_dollar_quotes=True
+clean_install_extensions_digest=True
+repair_extensions_digest=True
+repair_matches_clean_function=True
+repair_single_function=True
+repair_no_schema_or_table_ddl=True
+repair_contract=True
+repair_acl=True
+pgtap_executes_hash=True
+pgtap_checks_bound_schema=True
+
+python -m compileall -q football_live aprendizaje.py tests/test_sql_migrations.py
+completed successfully
+
+git diff --check
+no whitespace errors; only Windows LF-to-CRLF notices
+```
+
+The local SQL harness remains unavailable:
+
+```text
+supabase test db
+supabase: The term 'supabase' is not recognized as a name of a cmdlet, function, script file, or executable program.
+```
+
+No remote service, database mutation, or subagent was used.
+
+### Self-review
+
+- The static test independently covers both deployment paths. Replacing either function body with `public.digest`, removing `extensions.digest`, or omitting the repair migration makes it fail.
+- The forward migration contains one `CREATE OR REPLACE FUNCTION`, no table/schema/type/view/index/trigger DDL, and only the intended function ACL reset afterward.
+- The function signature and output contract are unchanged. The only runtime change is the fully qualified pgcrypto function schema.
+- Empty `search_path` remains defense in depth; all non-`pg_catalog` dependencies are explicitly schema-qualified as `private.canonical_jsonb` and `extensions.digest`.
+- pgTAP's direct hash assertion uses reversed UUID inputs and a fixed independently calculated digest, covering both pgcrypto execution and canonical sorting rather than merely grepping source text.
+- Execute privileges are reset after `CREATE OR REPLACE`: `PUBLIC`, `anon`, `authenticated`, and `service_role` are revoked first, then only `service_role` is granted execute.
+- The original applied migration was amended only for future clean installations; the new timestamped repair is what can correct already-applied databases after separate approval.
+
+### Changed files in fix round 3
+
+- `.superpowers/sdd/2026-09-24-football-live-product-implementation/task-6-report.md`
+- `supabase/migrations/20260928153000_add_controlled_training.sql`
+- `supabase/migrations/20260929155047_fix_training_hash_schema.sql`
+- `supabase/tests/002_controlled_training.sql`
+- `tests/test_sql_migrations.py`
+
+### Remaining concern
+
+The Python/static contracts are green, but the 71 pgTAP assertions and forward repair have not been executed against PostgreSQL locally because no Supabase CLI/database harness is installed. The new repair migration also remains unapplied remotely, as required.
