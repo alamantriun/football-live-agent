@@ -239,7 +239,7 @@ class SupabaseGateway:
             raise RepositoryUnavailable(PUBLIC_ERROR) from exc
 
     def record_training_evaluation(
-        self, evaluation: CandidateEvaluation
+        self, evaluation: CandidateEvaluation, run_id: UUID
     ) -> TrainingRun:
         metrics = {
             "candidate": evaluation.candidate_metrics.model_dump(),
@@ -251,6 +251,7 @@ class SupabaseGateway:
             .rpc(
                 "record_training_evaluation",
                 {
+                    "p_run_id": str(run_id),
                     "p_parameters": evaluation.parameters,
                     "p_code_version": evaluation.code_version,
                     "p_previous_model_id": str(evaluation.previous_model_id),
@@ -269,7 +270,7 @@ class SupabaseGateway:
         )
         rows = self._rows(response)
         try:
-            return self._training_run(
+            run = self._training_run(
                 rows[0],
                 train_fixture_ids=evaluation.train_fixture_ids,
                 validation_fixture_ids=evaluation.validation_fixture_ids,
@@ -277,6 +278,9 @@ class SupabaseGateway:
             )
         except (IndexError, KeyError, TypeError, ValueError) as exc:
             raise RepositoryUnavailable(PUBLIC_ERROR) from exc
+        if run.status == "failed":
+            return run.model_copy(update={"active_model_id": self.active_model().id})
+        return run
 
     def promote_model(self, candidate_id: UUID, current_id: UUID) -> ModelVersion:
         response = self._execute(
@@ -310,7 +314,12 @@ class SupabaseGateway:
             "succeeded": "promoted",
         }
         status = status_by_decision[row["decision"]]
-        candidate_model_id = UUID(str(row["candidate_model_id"]))
+        raw_candidate_model_id = row["candidate_model_id"]
+        candidate_model_id = (
+            UUID(str(raw_candidate_model_id))
+            if raw_candidate_model_id is not None
+            else None
+        )
         if not train_fixture_ids:
             train_fixture_ids = tuple(
                 UUID(str(item)) for item in row.get("train_fixture_ids") or ()
@@ -321,6 +330,8 @@ class SupabaseGateway:
                 for item in row.get("validation_fixture_ids") or ()
             )
         if status == "promoted":
+            if candidate_model_id is None:
+                raise ValueError("promoted run requires a candidate model")
             active_model_id = candidate_model_id
         return TrainingRun(
             id=row["id"],
@@ -343,9 +354,12 @@ class SupabaseGateway:
         )
         rows = self._rows(response)
         try:
-            return self._training_run(rows[0])
+            run = self._training_run(rows[0])
         except (IndexError, KeyError, TypeError, ValueError) as exc:
             raise RepositoryUnavailable(PUBLIC_ERROR) from exc
+        if run.status in {"failed", "rejected"}:
+            return run.model_copy(update={"active_model_id": self.active_model().id})
+        return run
 
     def recover_abandoned_training_evaluations(
         self, stale_after_seconds: int = 900, limit: int = 100

@@ -3,18 +3,19 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(53);
+select plan(67);
 
 select has_view('private', 'training_examples', 'training example projection exists');
 select has_table('private', 'consumed_validation_fixtures', 'validation consumption ledger exists');
 select col_is_pk('private', 'consumed_validation_fixtures', 'fixture_id', 'consumed IDs have one authoritative row');
 select has_column('private', 'training_runs', 'parameter_hash', 'training runs bind the canonical parameter hash');
+select has_column('private', 'model_versions', 'evidence_origin', 'model provenance is explicit');
 
 select has_function(
   'private',
   'record_training_evaluation',
-  array['jsonb', 'text', 'uuid', 'uuid[]', 'uuid[]', 'jsonb', 'boolean', 'text'],
-  'atomic training evidence RPC has no caller-owned version or hash'
+  array['uuid', 'jsonb', 'text', 'uuid', 'uuid[]', 'uuid[]', 'jsonb', 'boolean', 'text'],
+  'atomic training evidence RPC uses a caller-assigned run ID but no caller hash'
 );
 select has_function('private', 'finalize_training_evaluation', array['uuid'], 'terminal reconciliation RPC exists');
 select has_function(
@@ -25,7 +26,7 @@ select has_function(
 );
 
 select ok(
-  not (select prosecdef from pg_proc where oid = 'private.record_training_evaluation(jsonb,text,uuid,uuid[],uuid[],jsonb,boolean,text)'::regprocedure)
+  not (select prosecdef from pg_proc where oid = 'private.record_training_evaluation(uuid,jsonb,text,uuid,uuid[],uuid[],jsonb,boolean,text)'::regprocedure)
   and not (select prosecdef from pg_proc where oid = 'private.promote_model(uuid,uuid)'::regprocedure),
   'record and promotion RPCs are SECURITY INVOKER'
 );
@@ -38,7 +39,7 @@ select ok(
   'recovery RPC is SECURITY INVOKER'
 );
 select ok(
-  'search_path=""' = any(coalesce((select proconfig from pg_proc where oid = 'private.record_training_evaluation(jsonb,text,uuid,uuid[],uuid[],jsonb,boolean,text)'::regprocedure), array[]::text[]))
+  'search_path=""' = any(coalesce((select proconfig from pg_proc where oid = 'private.record_training_evaluation(uuid,jsonb,text,uuid,uuid[],uuid[],jsonb,boolean,text)'::regprocedure), array[]::text[]))
   and 'search_path=""' = any(coalesce((select proconfig from pg_proc where oid = 'private.promote_model(uuid,uuid)'::regprocedure), array[]::text[])),
   'record and promotion RPCs have an empty search_path'
 );
@@ -51,7 +52,7 @@ select ok(
   'recovery RPC has an empty search_path'
 );
 select ok(
-  (select prosrc like '%current_user <> ''service_role''%' from pg_proc where oid = 'private.record_training_evaluation(jsonb,text,uuid,uuid[],uuid[],jsonb,boolean,text)'::regprocedure)
+  (select prosrc like '%current_user <> ''service_role''%' from pg_proc where oid = 'private.record_training_evaluation(uuid,jsonb,text,uuid,uuid[],uuid[],jsonb,boolean,text)'::regprocedure)
   and (select prosrc like '%current_user <> ''service_role''%' from pg_proc where oid = 'private.promote_model(uuid,uuid)'::regprocedure)
   and (select prosrc like '%current_user <> ''service_role''%' from pg_proc where oid = 'private.finalize_training_evaluation(uuid)'::regprocedure)
   and (select prosrc like '%current_user <> ''service_role''%' from pg_proc where oid = 'private.recover_abandoned_training_evaluations(integer,integer)'::regprocedure),
@@ -59,18 +60,22 @@ select ok(
 );
 
 select ok(
-  has_function_privilege('service_role', 'private.record_training_evaluation(jsonb,text,uuid,uuid[],uuid[],jsonb,boolean,text)', 'EXECUTE')
+  has_function_privilege('service_role', 'private.record_training_evaluation(uuid,jsonb,text,uuid,uuid[],uuid[],jsonb,boolean,text)', 'EXECUTE')
   and has_function_privilege('service_role', 'private.promote_model(uuid,uuid)', 'EXECUTE')
   and has_function_privilege('service_role', 'private.finalize_training_evaluation(uuid)', 'EXECUTE')
   and has_function_privilege('service_role', 'private.recover_abandoned_training_evaluations(integer,integer)', 'EXECUTE'),
   'only the service contract is granted to service_role'
 );
 select ok(
-  not has_function_privilege('anon', 'private.finalize_training_evaluation(uuid)', 'EXECUTE')
-  and not has_function_privilege('authenticated', 'private.finalize_training_evaluation(uuid)', 'EXECUTE')
+  not has_function_privilege('anon', 'private.record_training_evaluation(uuid,jsonb,text,uuid,uuid[],uuid[],jsonb,boolean,text)', 'EXECUTE')
+  and not has_function_privilege('authenticated', 'private.record_training_evaluation(uuid,jsonb,text,uuid,uuid[],uuid[],jsonb,boolean,text)', 'EXECUTE')
   and not has_function_privilege('anon', 'private.promote_model(uuid,uuid)', 'EXECUTE')
-  and not has_function_privilege('authenticated', 'private.promote_model(uuid,uuid)', 'EXECUTE'),
-  'anon and authenticated cannot finalize evaluations'
+  and not has_function_privilege('authenticated', 'private.promote_model(uuid,uuid)', 'EXECUTE')
+  and not has_function_privilege('anon', 'private.finalize_training_evaluation(uuid)', 'EXECUTE')
+  and not has_function_privilege('authenticated', 'private.finalize_training_evaluation(uuid)', 'EXECUTE')
+  and not has_function_privilege('anon', 'private.recover_abandoned_training_evaluations(integer,integer)', 'EXECUTE')
+  and not has_function_privilege('authenticated', 'private.recover_abandoned_training_evaluations(integer,integer)', 'EXECUTE'),
+  'anon and authenticated cannot execute any training RPC'
 );
 select ok(
   not exists (
@@ -78,7 +83,7 @@ select ok(
     from pg_proc as procedures
     cross join lateral aclexplode(coalesce(procedures.proacl, acldefault('f', procedures.proowner))) as grants
     where procedures.oid in (
-      'private.record_training_evaluation(jsonb,text,uuid,uuid[],uuid[],jsonb,boolean,text)'::regprocedure,
+      'private.record_training_evaluation(uuid,jsonb,text,uuid,uuid[],uuid[],jsonb,boolean,text)'::regprocedure,
       'private.promote_model(uuid,uuid)'::regprocedure,
       'private.finalize_training_evaluation(uuid)'::regprocedure,
       'private.recover_abandoned_training_evaluations(integer,integer)'::regprocedure
@@ -89,6 +94,24 @@ select ok(
   'PUBLIC has no execute grant on training lifecycle RPCs'
 );
 select ok(not has_table_privilege('anon', 'private.consumed_validation_fixtures', 'SELECT'), 'anon cannot read consumed IDs');
+select ok(
+  not has_table_privilege('service_role', 'private.model_versions', 'INSERT')
+  and not has_table_privilege('service_role', 'private.model_versions', 'UPDATE')
+  and not has_table_privilege('service_role', 'private.training_runs', 'INSERT')
+  and not has_table_privilege('service_role', 'private.training_runs', 'UPDATE'),
+  'service role has no table-wide model or run mutation grants'
+);
+select ok(
+  has_column_privilege('service_role', 'private.model_versions', 'version', 'INSERT')
+  and not has_column_privilege('service_role', 'private.model_versions', 'id', 'INSERT')
+  and has_column_privilege('service_role', 'private.model_versions', 'state', 'UPDATE')
+  and not has_column_privilege('service_role', 'private.model_versions', 'parameters', 'UPDATE')
+  and has_column_privilege('service_role', 'private.training_runs', 'id', 'INSERT')
+  and not has_column_privilege('service_role', 'private.training_runs', 'started_at', 'INSERT')
+  and has_column_privilege('service_role', 'private.training_runs', 'decision', 'UPDATE')
+  and not has_column_privilege('service_role', 'private.training_runs', 'metrics', 'UPDATE'),
+  'service role has only RPC-required model and run columns'
+);
 
 grant usage on schema private to authenticated;
 grant execute on function private.finalize_training_evaluation(uuid) to authenticated;
@@ -111,7 +134,6 @@ select throws_ok(
   'anon cannot read private training examples'
 );
 reset role;
-set local role service_role;
 
 insert into private.model_versions (
   id, version, state, parameters, parameter_hash, code_version,
@@ -130,6 +152,8 @@ values (
   0.10,
   now()
 );
+
+set local role service_role;
 
 insert into private.fixtures (
   id, provider, provider_fixture_id, competition, home_name, away_name,
@@ -195,6 +219,7 @@ where fixture_id = '50000000-0000-0000-0000-000000000190';
 select throws_ok(
   $$
     select private.record_training_evaluation(
+      gen_random_uuid(),
       '{"factores":{"local":1.1,"visitante":0.9}}', 'new-code',
       '40000000-0000-0000-0000-000000000001',
       (select array_agg(id order by id) from private.fixtures where provider_fixture_id between 'controlled-001' and 'controlled-070'),
@@ -212,6 +237,7 @@ where fixture_id = '50000000-0000-0000-0000-000000000001';
 select throws_ok(
   $$
     select private.record_training_evaluation(
+      gen_random_uuid(),
       '{"factores":{"local":1.1,"visitante":0.9}}', 'new-code',
       '40000000-0000-0000-0000-000000000001',
       (select array_agg(id order by id) from private.fixtures where provider_fixture_id between 'controlled-001' and 'controlled-070'),
@@ -231,6 +257,7 @@ where private.outcomes.fixture_id = private.fixtures.id
 select throws_ok(
   $$
     select private.record_training_evaluation(
+      gen_random_uuid(),
       '{"factores":{"local":1.1,"visitante":0.9}}', 'new-code',
       '40000000-0000-0000-0000-000000000001',
       (select array_agg(id order by id) from private.fixtures where provider_fixture_id between 'controlled-001' and 'controlled-070'),
@@ -245,6 +272,7 @@ select throws_ok(
 select set_config(
   'test.rejected_run_id',
   (select id::text from private.record_training_evaluation(
+    '71000000-0000-0000-0000-000000000001',
     '{"factores":{"local":1.1,"visitante":0.9}}', 'new-code',
     '40000000-0000-0000-0000-000000000001',
     (select array_agg(id order by id) from private.fixtures where provider_fixture_id between 'controlled-001' and 'controlled-070'),
@@ -259,6 +287,21 @@ select is((select state::text from private.model_versions where id = (select can
 select is((select decision::text from private.training_runs where id = current_setting('test.rejected_run_id')::uuid), 'rejected', 'losing run is terminal');
 select is((select count(*) from private.consumed_validation_fixtures where training_run_id = current_setting('test.rejected_run_id')::uuid), 30::bigint, 'rejected validation IDs are consumed');
 
+select throws_ok(
+  $$
+    insert into private.model_versions (
+      version, state, parameters, parameter_hash, code_version,
+      previous_model_id, train_size, validation_size, brier, log_loss
+    ) values (
+      'noncanonical-direct-candidate', 'candidate', '{}', 'not-a-sha256',
+      'new-code', '40000000-0000-0000-0000-000000000001', 70, 30, 0.2, 0.6
+    )
+  $$,
+  '22023', 'new service models require controlled canonical provenance',
+  'service role cannot insert a new noncanonical candidate'
+);
+
+reset role;
 select throws_ok(
   $$update private.training_runs set train_fixture_ids = '{}' where id = current_setting('test.rejected_run_id')::uuid$$,
   '22023', 'training run evidence is immutable', 'train IDs are immutable'
@@ -287,26 +330,35 @@ select throws_ok(
   $$update private.model_versions set parameters = '{"tampered":true}' where id = (select candidate_model_id from private.training_runs where id = current_setting('test.rejected_run_id')::uuid)$$,
   '22023', 'model evidence is immutable', 'model parameters are immutable'
 );
-
 select throws_ok(
-  $$
-    select private.record_training_evaluation(
+  $$update private.model_versions set id = '49999999-9999-9999-9999-999999999999' where id = (select candidate_model_id from private.training_runs where id = current_setting('test.rejected_run_id')::uuid)$$,
+  '22023', 'model evidence is immutable', 'model IDs are immutable in the trigger'
+);
+set local role service_role;
+
+select set_config(
+  'test.holdout_collision_run_id',
+  (select id::text from private.record_training_evaluation(
+      '71000000-0000-0000-0000-000000000002',
       '{"duplicate_marker":true}', 'new-code',
       '40000000-0000-0000-0000-000000000001',
       (select array_agg(id order by id) from private.fixtures where provider_fixture_id between 'controlled-001' and 'controlled-070'),
       (select array_agg(id order by id) from private.fixtures where provider_fixture_id between 'controlled-131' and 'controlled-160'),
       '{"candidate":{"brier":0.4,"log_loss":0.8},"champion":{"brier":0.4,"log_loss":0.8},"baseline":{"brier":0.5,"log_loss":0.9}}',
       false, 'duplicate'
-    )
-  $$,
-  '23505', null, 'validation IDs cannot be consumed twice'
+  )),
+  true
 );
-select is((select count(*) from private.model_versions where parameters ? 'duplicate_marker'), 0::bigint, 'duplicate failure rolls back orphan candidate');
-select is((select count(*) from private.training_runs where reason = 'duplicate'), 0::bigint, 'duplicate failure rolls back orphan run');
+select is((select decision::text from private.training_runs where id = current_setting('test.holdout_collision_run_id')::uuid), 'failed', 'holdout collision persists a terminal loser run');
+select is((select candidate_model_id from private.training_runs where id = current_setting('test.holdout_collision_run_id')::uuid), null::uuid, 'holdout collision rolls back its candidate binding');
+select is((select count(*) from private.model_versions where parameters ? 'duplicate_marker'), 0::bigint, 'holdout collision rolls back its orphan candidate');
+select is((select count(*) from private.consumed_validation_fixtures where fixture_id between '50000000-0000-0000-0000-000000000131' and '50000000-0000-0000-0000-000000000160'), 30::bigint, 'holdout collision does not duplicate consumption rows');
+select is((select decision::text from private.finalize_training_evaluation(current_setting('test.holdout_collision_run_id')::uuid)), 'failed', 'terminal collision can be reconciled after an uncertain response');
 
 select set_config(
   'test.accepted_run_id',
   (select id::text from private.record_training_evaluation(
+    '72000000-0000-0000-0000-000000000001',
     '{"factores":{"local":1.2,"visitante":0.8}}', 'new-code',
     '40000000-0000-0000-0000-000000000001',
     (select array_agg(id order by id desc) from private.fixtures where provider_fixture_id between 'controlled-001' and 'controlled-100'),
@@ -330,6 +382,24 @@ select is(
 select is((select state::text from private.model_versions where id = (select candidate_model_id from private.training_runs where id = current_setting('test.accepted_run_id')::uuid)), 'candidate', 'winning candidate exists before promotion');
 select is((select decision::text from private.training_runs where id = current_setting('test.accepted_run_id')::uuid), 'running', 'winning run remains pending before promotion');
 
+select set_config(
+  'test.identical_loser_run_id',
+  (select id::text from private.record_training_evaluation(
+    '72000000-0000-0000-0000-000000000002',
+    '{"factores":{"local":1.2,"visitante":0.8}}', 'new-code',
+    '40000000-0000-0000-0000-000000000001',
+    (select array_agg(id order by id) from private.fixtures where provider_fixture_id between 'controlled-001' and 'controlled-100'),
+    (select array_agg(id order by id) from private.fixtures where provider_fixture_id between 'controlled-101' and 'controlled-130'),
+    '{"candidate":{"brier":0.3,"log_loss":0.7},"champion":{"brier":0.4,"log_loss":0.8},"baseline":{"brier":0.5,"log_loss":0.9}}',
+    true, 'candidate strictly improved both metrics'
+  )),
+  true
+);
+select is((select decision::text from private.training_runs where id = current_setting('test.identical_loser_run_id')::uuid), 'failed', 'serialized identical evaluation persists one terminal loser');
+select is((select candidate_model_id from private.training_runs where id = current_setting('test.identical_loser_run_id')::uuid), null::uuid, 'identical loser has no orphan candidate binding');
+select is((select count(*) from private.model_versions where parameter_hash = '9a8c2e8920d02b731f9ff5c77fbe4040fb3d59b05a239e164c493c38e519fa81'), 1::bigint, 'identical evaluations create exactly one candidate');
+select is((select count(*) from private.consumed_validation_fixtures where fixture_id between '50000000-0000-0000-0000-000000000101' and '50000000-0000-0000-0000-000000000130'), 30::bigint, 'identical loser cannot reuse or duplicate the winner holdout');
+
 select throws_ok(
   $$select private.promote_model((select candidate_model_id from private.training_runs where id = current_setting('test.accepted_run_id')::uuid), '99999999-9999-9999-9999-999999999999')$$,
   'P0002', 'current model not found', 'failed promotion aborts transactionally'
@@ -343,6 +413,24 @@ select lives_ok(
 );
 select is((select decision::text from private.finalize_training_evaluation(current_setting('test.accepted_run_id')::uuid)), 'succeeded', 'reconciliation recognizes an already committed promotion');
 
+select set_config(
+  'test.stale_champion_run_id',
+  (select id::text from private.record_training_evaluation(
+    '72000000-0000-0000-0000-000000000003',
+    '{"factores":{"local":1.3,"visitante":0.7}}', 'new-code',
+    '40000000-0000-0000-0000-000000000001',
+    (select array_agg(id order by id) from private.fixtures where provider_fixture_id between 'controlled-001' and 'controlled-130'),
+    (select array_agg(id order by id) from private.fixtures where provider_fixture_id between 'controlled-161' and 'controlled-190'),
+    '{"candidate":{"brier":0.2,"log_loss":0.6},"champion":{"brier":0.3,"log_loss":0.7},"baseline":{"brier":0.5,"log_loss":0.9}}',
+    true, 'candidate strictly improved both metrics'
+  )),
+  true
+);
+select is((select decision::text from private.training_runs where id = current_setting('test.stale_champion_run_id')::uuid), 'failed', 'evaluation losing the promotion race is terminal');
+select is((select candidate_model_id from private.training_runs where id = current_setting('test.stale_champion_run_id')::uuid), null::uuid, 'stale-champion loser has no candidate');
+select is((select count(*) from private.consumed_validation_fixtures where fixture_id between '50000000-0000-0000-0000-000000000161' and '50000000-0000-0000-0000-000000000190'), 0::bigint, 'stale-champion loser does not claim holdout evidence');
+
+reset role;
 insert into private.model_versions (
   id, version, state, parameters, parameter_hash, code_version,
   previous_model_id, train_size, validation_size, brier, log_loss
@@ -370,6 +458,7 @@ select id, '70000000-0000-0000-0000-000000000001'
 from private.fixtures
 where provider_fixture_id between 'controlled-161' and 'controlled-190';
 
+set local role service_role;
 select is((select count(*) from private.recover_abandoned_training_evaluations(900, 100)), 1::bigint, 'stale recovery is callable and bounded');
 select is((select state::text from private.model_versions where id = '60000000-0000-0000-0000-000000000001'), 'rejected', 'stale candidate is rejected');
 select is((select decision::text from private.training_runs where id = '70000000-0000-0000-0000-000000000001'), 'failed', 'stale run becomes terminal failed');

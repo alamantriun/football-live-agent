@@ -12,6 +12,18 @@ alter table private.consumed_validation_fixtures enable row level security;
 alter table private.training_runs
   add column parameter_hash text;
 
+alter table private.model_versions
+  add column evidence_origin text;
+
+update private.model_versions
+set evidence_origin = 'legacy_task2';
+
+alter table private.model_versions
+  alter column evidence_origin set default 'controlled_training',
+  alter column evidence_origin set not null,
+  add constraint model_versions_evidence_origin_allowed
+    check (evidence_origin in ('legacy_task2', 'controlled_training'));
+
 alter table private.training_runs
   add constraint training_runs_parameter_hash_format
   check (parameter_hash is null or parameter_hash ~ '^[0-9a-f]{64}$');
@@ -173,10 +185,12 @@ security invoker
 set search_path = ''
 as $$
 begin
-  if new.version is distinct from old.version
+  if new.id is distinct from old.id
+     or new.version is distinct from old.version
      or new.parameters is distinct from old.parameters
      or new.parameter_hash is distinct from old.parameter_hash
      or new.code_version is distinct from old.code_version
+     or new.evidence_origin is distinct from old.evidence_origin
      or new.train_size is distinct from old.train_size
      or new.validation_size is distinct from old.validation_size
      or new.brier is distinct from old.brier
@@ -220,6 +234,33 @@ begin
   return new;
 end;
 $$;
+
+create function private.enforce_model_version_insert()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  if new.evidence_origin = 'controlled_training'
+     and new.parameter_hash !~ '^[0-9a-f]{64}$' then
+    raise exception 'new service models require controlled canonical provenance'
+      using errcode = '22023';
+  end if;
+
+  if current_user = 'service_role'
+     and new.evidence_origin <> 'controlled_training' then
+    raise exception 'new service models require controlled canonical provenance'
+      using errcode = '22023';
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger model_versions_canonical_insert
+before insert on private.model_versions
+for each row execute function private.enforce_model_version_insert();
 
 create trigger model_versions_immutable_evidence
 before update on private.model_versions
@@ -267,6 +308,7 @@ before update on private.training_runs
 for each row execute function private.enforce_training_run_immutability();
 
 create function private.record_training_evaluation(
+  p_run_id uuid,
   p_parameters jsonb,
   p_code_version text,
   p_previous_model_id uuid,
@@ -300,13 +342,16 @@ declare
   v_baseline_brier double precision;
   v_baseline_log_loss double precision;
   v_metrics_approve boolean;
+  v_constraint_name text;
+  v_run_metrics jsonb;
 begin
   if current_user <> 'service_role' then
     raise exception 'service_role is required'
       using errcode = '42501';
   end if;
 
-  if nullif(btrim(p_code_version), '') is null
+  if p_run_id is null
+     or nullif(btrim(p_code_version), '') is null
      or jsonb_typeof(p_parameters) is distinct from 'object'
      or p_previous_model_id is null
      or p_train_fixture_ids is null
@@ -315,16 +360,6 @@ begin
      or nullif(btrim(p_reason), '') is null then
     raise exception 'complete canonical training evidence is required'
       using errcode = '22023';
-  end if;
-
-  select * into v_active
-  from private.model_versions
-  where id = p_previous_model_id
-  for update;
-
-  if not found or v_active.state <> 'active' then
-    raise exception 'previous model must be the active model'
-      using errcode = '40001';
   end if;
 
   v_train_count := cardinality(p_train_fixture_ids);
@@ -430,61 +465,157 @@ begin
     p_code_version
   );
   v_version := 'live-fit-' || substr(v_parameter_hash, 1, 12);
+  v_run_metrics := jsonb_build_object(
+    'brier', v_candidate_brier,
+    'log_loss', v_candidate_log_loss
+  ) || p_metrics;
 
-  insert into private.model_versions (
-    version,
-    state,
-    parameters,
-    parameter_hash,
-    code_version,
-    previous_model_id,
-    train_size,
-    validation_size,
-    brier,
-    log_loss
-  )
-  values (
-    v_version,
-    case when p_approved then 'candidate'::private.model_state else 'rejected'::private.model_state end,
-    p_parameters,
-    v_parameter_hash,
-    p_code_version,
-    p_previous_model_id,
-    v_train_count,
-    v_validation_count,
-    v_candidate_brier,
-    v_candidate_log_loss
-  )
-  returning id into v_candidate_id;
+  perform pg_advisory_xact_lock(hashtextextended(p_run_id::text, 1));
+  perform pg_advisory_xact_lock(hashtextextended(v_parameter_hash, 2));
 
-  insert into private.training_runs (
-    finished_at,
-    train_fixture_ids,
-    validation_fixture_ids,
-    candidate_model_id,
-    parameter_hash,
-    metrics,
-    decision,
-    reason
-  )
-  values (
-    case when p_approved then null else now() end,
-    p_train_fixture_ids,
-    p_validation_fixture_ids,
-    v_candidate_id,
-    v_parameter_hash,
-    jsonb_build_object(
-      'brier', v_candidate_brier,
-      'log_loss', v_candidate_log_loss
-    ) || p_metrics,
-    case when p_approved then 'running'::private.run_state else 'rejected'::private.run_state end,
-    p_reason
-  )
-  returning * into v_run;
+  select * into v_run
+  from private.training_runs
+  where id = p_run_id;
 
-  insert into private.consumed_validation_fixtures (fixture_id, training_run_id)
-  select fixture_id, v_run.id
-  from unnest(p_validation_fixture_ids) as validation_ids(fixture_id);
+  if found then
+    if v_run.parameter_hash is distinct from v_parameter_hash
+       or v_run.train_fixture_ids is distinct from p_train_fixture_ids
+       or v_run.validation_fixture_ids is distinct from p_validation_fixture_ids
+       or v_run.metrics is distinct from v_run_metrics then
+      raise exception 'training run ID is already bound to different evidence'
+        using errcode = '22023';
+    end if;
+    return v_run;
+  end if;
+
+  select * into v_active
+  from private.model_versions
+  where id = p_previous_model_id
+  for update;
+
+  if not found or v_active.state <> 'active' then
+    insert into private.training_runs (
+      id,
+      finished_at,
+      train_fixture_ids,
+      validation_fixture_ids,
+      candidate_model_id,
+      parameter_hash,
+      metrics,
+      decision,
+      reason,
+      sanitized_error
+    )
+    values (
+      p_run_id,
+      now(),
+      p_train_fixture_ids,
+      p_validation_fixture_ids,
+      null,
+      v_parameter_hash,
+      v_run_metrics,
+      'failed',
+      'active model changed before evaluation persistence',
+      'evaluation champion is no longer active'
+    )
+    returning * into v_run;
+    return v_run;
+  end if;
+
+  begin
+    insert into private.model_versions (
+      version,
+      state,
+      parameters,
+      parameter_hash,
+      code_version,
+      evidence_origin,
+      previous_model_id,
+      train_size,
+      validation_size,
+      brier,
+      log_loss
+    )
+    values (
+      v_version,
+      case when p_approved then 'candidate'::private.model_state else 'rejected'::private.model_state end,
+      p_parameters,
+      v_parameter_hash,
+      p_code_version,
+      'controlled_training',
+      p_previous_model_id,
+      v_train_count,
+      v_validation_count,
+      v_candidate_brier,
+      v_candidate_log_loss
+    )
+    returning id into v_candidate_id;
+
+    insert into private.training_runs (
+      id,
+      finished_at,
+      train_fixture_ids,
+      validation_fixture_ids,
+      candidate_model_id,
+      parameter_hash,
+      metrics,
+      decision,
+      reason
+    )
+    values (
+      p_run_id,
+      case when p_approved then null else now() end,
+      p_train_fixture_ids,
+      p_validation_fixture_ids,
+      v_candidate_id,
+      v_parameter_hash,
+      v_run_metrics,
+      case when p_approved then 'running'::private.run_state else 'rejected'::private.run_state end,
+      p_reason
+    )
+    returning * into v_run;
+
+    insert into private.consumed_validation_fixtures (fixture_id, training_run_id)
+    select fixture_id, v_run.id
+    from unnest(p_validation_fixture_ids) as validation_ids(fixture_id);
+  exception
+    when unique_violation then
+      get stacked diagnostics v_constraint_name = constraint_name;
+      if v_constraint_name not in (
+        'model_versions_version_key',
+        'model_versions_parameter_hash_key',
+        'training_runs_candidate_model_id_unique',
+        'consumed_validation_fixtures_pkey'
+      ) then
+        raise;
+      end if;
+
+      insert into private.training_runs (
+        id,
+        finished_at,
+        train_fixture_ids,
+        validation_fixture_ids,
+        candidate_model_id,
+        parameter_hash,
+        metrics,
+        decision,
+        reason,
+        sanitized_error
+      )
+      values (
+        p_run_id,
+        now(),
+        p_train_fixture_ids,
+        p_validation_fixture_ids,
+        null,
+        v_parameter_hash,
+        v_run_metrics,
+        'failed',
+        'evaluation collision; candidate not persisted',
+        'candidate or validation evidence was already claimed'
+      )
+      returning * into v_run;
+  end;
 
   return v_run;
 end;
@@ -562,7 +693,7 @@ begin
 
   if v_candidate.state <> 'candidate'
      or (
-       v_candidate.parameter_hash ~ '^[0-9a-f]{64}$'
+       v_candidate.evidence_origin = 'controlled_training'
        and v_candidate.previous_model_id is distinct from p_current_id
      ) then
     raise exception 'model to promote must be a candidate for the current model'
@@ -617,9 +748,10 @@ begin
     v_candidate.code_version
   );
 
-  if v_candidate.parameter_hash ~ '^[0-9a-f]{64}$'
+  if v_candidate.evidence_origin = 'controlled_training'
      and (
-       v_candidate.parameter_hash is distinct from v_expected_parameter_hash
+       v_candidate.parameter_hash !~ '^[0-9a-f]{64}$'
+       or v_candidate.parameter_hash is distinct from v_expected_parameter_hash
        or v_run.parameter_hash is distinct from v_expected_parameter_hash
      ) then
     raise exception 'candidate and training run must match the canonical evidence hash'
@@ -794,6 +926,14 @@ begin
       using errcode = 'P0002';
   end if;
 
+  if v_run.decision in ('rejected', 'failed') then
+    select * into v_run
+    from private.training_runs
+    where id = p_run_id
+    for update;
+    return v_run;
+  end if;
+
   select * into v_candidate
   from private.model_versions
   where id = v_run.candidate_model_id
@@ -909,18 +1049,32 @@ revoke all on private.consumed_validation_fixtures from public, anon, authentica
 revoke all on private.training_examples from public, anon, authenticated, service_role;
 revoke all on function private.canonical_jsonb(jsonb) from public, anon, authenticated, service_role;
 revoke all on function private.compute_training_hash(jsonb, uuid[], uuid[], text) from public, anon, authenticated, service_role;
+revoke all on function private.enforce_model_version_insert() from public, anon, authenticated, service_role;
 revoke all on function private.enforce_model_version_immutability() from public, anon, authenticated, service_role;
 revoke all on function private.enforce_training_run_immutability() from public, anon, authenticated, service_role;
-revoke all on function private.record_training_evaluation(jsonb, text, uuid, uuid[], uuid[], jsonb, boolean, text) from public, anon, authenticated, service_role;
+revoke all on function private.record_training_evaluation(uuid, jsonb, text, uuid, uuid[], uuid[], jsonb, boolean, text) from public, anon, authenticated, service_role;
 revoke all on function private.promote_model(uuid, uuid) from public, anon, authenticated, service_role;
 revoke all on function private.finalize_training_evaluation(uuid) from public, anon, authenticated, service_role;
 revoke all on function private.recover_abandoned_training_evaluations(integer, integer) from public, anon, authenticated, service_role;
 
 grant select, insert on private.consumed_validation_fixtures to service_role;
 grant select on private.training_examples to service_role;
+revoke insert, update on private.model_versions, private.training_runs from service_role;
+grant insert (
+  version, state, parameters, parameter_hash, code_version, evidence_origin,
+  previous_model_id, train_size, validation_size, brier, log_loss
+) on private.model_versions to service_role;
+grant update (state, previous_model_id, activated_at)
+  on private.model_versions to service_role;
+grant insert (
+  id, finished_at, train_fixture_ids, validation_fixture_ids,
+  candidate_model_id, parameter_hash, metrics, decision, reason, sanitized_error
+) on private.training_runs to service_role;
+grant update (finished_at, decision, reason, sanitized_error)
+  on private.training_runs to service_role;
 grant execute on function private.canonical_jsonb(jsonb) to service_role;
 grant execute on function private.compute_training_hash(jsonb, uuid[], uuid[], text) to service_role;
-grant execute on function private.record_training_evaluation(jsonb, text, uuid, uuid[], uuid[], jsonb, boolean, text) to service_role;
+grant execute on function private.record_training_evaluation(uuid, jsonb, text, uuid, uuid[], uuid[], jsonb, boolean, text) to service_role;
 grant execute on function private.promote_model(uuid, uuid) to service_role;
 grant execute on function private.finalize_training_evaluation(uuid) to service_role;
 grant execute on function private.recover_abandoned_training_evaluations(integer, integer) to service_role;

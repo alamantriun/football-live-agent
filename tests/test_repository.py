@@ -841,7 +841,7 @@ def test_training_evidence_and_promotion_use_exact_private_rpcs(
     ]
     fake_client.responses[("private", "rpc", "promote_model")] = [model_row]
 
-    recorded = gateway.record_training_evaluation(evaluation)
+    recorded = gateway.record_training_evaluation(evaluation, RUN_ID)
     promoted = gateway.promote_model(MODEL_ID, CURRENT_MODEL_ID)
 
     assert recorded.id == RUN_ID
@@ -851,6 +851,7 @@ def test_training_evidence_and_promotion_use_exact_private_rpcs(
     assert record_operation["schema"] == "private"
     assert record_operation["name"] == "record_training_evaluation"
     assert record_operation["params"] == {
+        "p_run_id": str(RUN_ID),
         "p_parameters": evaluation.parameters,
         "p_code_version": evaluation.code_version,
         "p_previous_model_id": str(MODEL_ID),
@@ -922,4 +923,72 @@ def test_training_recovery_rpcs_map_terminal_state_and_use_safe_bounds(
         "kind": "rpc",
         "name": "recover_abandoned_training_evaluations",
         "params": {"p_stale_after_seconds": 900, "p_limit": 100},
+    }
+
+
+def test_record_collision_can_return_a_terminal_run_without_a_candidate(
+    gateway, fake_client, model_row
+):
+    train_ids = tuple(UUID(int=index) for index in range(1, 71))
+    validation_ids = tuple(UUID(int=index) for index in range(71, 101))
+    evaluation = CandidateEvaluation(
+        version="live-fit-abc123",
+        parameters={"factores": {"local": 1.1, "visitante": 0.9}},
+        parameter_hash="a" * 64,
+        code_version="abc123",
+        previous_model_id=CURRENT_MODEL_ID,
+        train_fixture_ids=train_ids,
+        validation_fixture_ids=validation_ids,
+        candidate_metrics=TrainingMetrics(brier=0.18, log_loss=0.58),
+        champion_metrics=TrainingMetrics(brier=0.19, log_loss=0.61),
+        baseline_metrics=TrainingMetrics(brier=0.21, log_loss=0.65),
+        approved=True,
+        reason="candidate strictly improved both metrics",
+    )
+    fake_client.responses[("private", "rpc", "record_training_evaluation")] = [
+        {
+            "id": str(RUN_ID),
+            "candidate_model_id": None,
+            "decision": "failed",
+            "parameter_hash": "a" * 64,
+        }
+    ]
+    fake_client.responses[("private", "table", "model_versions")] = [model_row]
+
+    recorded = gateway.record_training_evaluation(evaluation, RUN_ID)
+
+    assert recorded.status == "failed"
+    assert recorded.candidate_model_id is None
+    assert recorded.active_model_id == MODEL_ID
+
+
+def test_failed_reconciliation_reports_the_real_active_model(
+    gateway, fake_client, model_row
+):
+    fake_client.responses[("private", "rpc", "finalize_training_evaluation")] = [
+        {
+            "id": str(RUN_ID),
+            "candidate_model_id": str(CURRENT_MODEL_ID),
+            "decision": "failed",
+            "parameter_hash": "b" * 64,
+        }
+    ]
+    fake_client.responses[("private", "table", "model_versions")] = [model_row]
+
+    finalized = gateway.finalize_training_evaluation(RUN_ID)
+
+    assert finalized.status == "failed"
+    assert finalized.active_model_id == MODEL_ID
+    assert fake_client.operations[-1] == {
+        "schema": "private",
+        "kind": "table",
+        "name": "model_versions",
+        "params": None,
+        "select": (
+            "id,version,state,parameters,parameter_hash,code_version,"
+            "previous_model_id,train_size,validation_size,brier,log_loss,"
+            "created_at,activated_at"
+        ),
+        "filters": [("eq", "state", "active")],
+        "limit": 1,
     }

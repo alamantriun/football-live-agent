@@ -6,7 +6,7 @@ import hashlib
 import json
 import math
 from typing import Annotated, Any, Literal, Protocol
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import AwareDatetime, Field, FiniteFloat, model_validator
 
@@ -110,7 +110,7 @@ class TrainingRepository(Protocol):
     ) -> int: ...
 
     def record_training_evaluation(
-        self, evaluation: CandidateEvaluation
+        self, evaluation: CandidateEvaluation, run_id: UUID
     ) -> TrainingRun: ...
 
     def promote_model(self, candidate_id: UUID, current_id: UUID) -> ModelVersion: ...
@@ -333,8 +333,15 @@ class TrainingService:
             train_fixture_ids=train_ids,
             validation_fixture_ids=validation_ids,
         )
-        recorded = repository.record_training_evaluation(evaluation)
-        if not decision.approved:
+        run_id = uuid4()
+        try:
+            recorded = repository.record_training_evaluation(evaluation, run_id)
+        except Exception as record_error:
+            try:
+                return repository.finalize_training_evaluation(run_id)
+            except Exception:
+                raise record_error
+        if recorded.status != "candidate":
             return recorded
         if recorded.candidate_model_id is None:
             raise RuntimeError("persisted candidate ID is required for promotion")

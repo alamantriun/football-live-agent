@@ -283,3 +283,117 @@ No CLI package, database, remote service, or subagent was used.
 ### Remaining concern
 
 The Python and static SQL contracts are verified locally, but the 53 pgTAP assertions could not be executed without a local Supabase/PostgreSQL harness. They must pass in the approved isolated database environment before the still-unapplied migration is sent remotely.
+
+## Fix round 2/5 - close training concurrency gaps
+
+### Outcome
+
+Addressed every round-two review finding without applying the migration remotely:
+
+- every evaluation now receives a caller-generated durable run UUID before the record RPC, so an uncertain record response can be reconciled by identity;
+- record-time uniqueness conflicts are contained in a PostgreSQL subtransaction: candidate, run, and partial holdout claims roll back together, then a terminal `failed` audit run is inserted and returned;
+- canonical-hash advisory locking serializes identical evaluations, so two identical accepted attempts produce one candidate-owning winner and one terminal loser, with exactly one set of 30 consumed validation fixtures;
+- a stale-champion attempt after a competing promotion is recorded as a terminal failed run without claiming holdout evidence;
+- `TrainingService` now reconciles record exceptions as well as promotion exceptions and returns terminal collision outcomes without attempting promotion;
+- new controlled candidates must use PostgreSQL-computed canonical 64-hex hashes; the only compatibility path is explicit `legacy_task2` provenance assigned to pre-existing/rollback-only Task 2 fixtures, not a hash-shape heuristic;
+- direct table mutation is narrowed to the exact columns required by the `SECURITY INVOKER` RPCs, while triggers keep evidence, model IDs, and provenance immutable;
+- pgTAP now denies `PUBLIC`, `anon`, and `authenticated` for record, promote, finalize, and recover, and expands concurrency/collision/provenance coverage to 67 assertions.
+
+### RED evidence
+
+The first focused test run proved that record attempts lacked a durable caller-owned identity, record exceptions were not reconciled, collision rows could not omit a candidate, and failed reconciliation returned a fake `None` active model:
+
+```text
+python -m pytest tests/test_training.py::test_service_reconciles_uncertain_record_response_by_preassigned_run_id tests/test_training.py::test_service_returns_terminal_record_collision_without_promotion tests/test_repository.py::test_record_training_evaluation_sends_preassigned_run_id tests/test_repository.py::test_record_collision_can_return_a_terminal_run_without_a_candidate tests/test_repository.py::test_finalize_failed_evaluation_reports_actual_active_model -q
+5 failed
+```
+
+After those fixes, one additional focused test exposed that terminal record-collision responses still reported the prior model rather than the database's current active model:
+
+```text
+python -m pytest tests/test_repository.py::test_record_collision_can_return_a_terminal_run_without_a_candidate -q
+FAILED ... expected MODEL_ID, got CURRENT_MODEL_ID
+1 failed
+```
+
+Both focused RED sets were made green before broader regression testing:
+
+```text
+5 passed in 0.20s
+1 passed in 0.15s
+```
+
+### GREEN evidence
+
+Directed learning, repository, probabilistic-model, and live-quality regressions after implementation:
+
+```text
+$env:PYTHONPATH=(Resolve-Path 'work/packages').Path
+python -m pytest tests/test_training.py tests/test_repository.py test_modelo_probabilistico.py test_vivo_confiable.py -q
+93 passed in 1.40s
+```
+
+Filtered full suite, excluding only the permitted unchanged legacy `tmp_path` test:
+
+```text
+$env:PYTHONPATH=(Resolve-Path 'work/packages').Path
+python -m pytest -q -k "not test_registro_no_cuenta_repeticiones_ni_predicciones_finales"
+151 passed, 1 deselected in 7.56s
+```
+
+Unfiltered full suite:
+
+```text
+$env:PYTHONPATH=(Resolve-Path 'work/packages').Path
+python -m pytest -q
+152 passed in 7.56s
+```
+
+Static SQL contract checks:
+
+```text
+assertions 67
+balanced_dollar_quotes=True
+pgtap_plan_matches=True
+run_id_signature=True
+collision_subtransaction=True
+concurrency_lock=True
+explicit_provenance=True
+model_id_immutable=True
+least_privilege=True
+no_auth_role=True
+```
+
+The local SQL harness is still unavailable and no remote substitute was used:
+
+```text
+supabase test db
+supabase: The term 'supabase' is not recognized as a name of a cmdlet, function, script file, or executable program.
+```
+
+### Self-review
+
+- Lock order is deterministic: the record RPC takes transaction-scoped advisory locks for the run UUID and then canonical hash before reading/locking the active champion. Identical evidence serializes on the hash, while same-run retries serialize on the run UUID and return idempotently only when immutable evidence matches.
+- Candidate creation, running-run creation, and all validation claims remain atomic inside one nested block. Known uniqueness conflicts roll back that block only; the outer transaction records a terminal failed audit run. Unexpected uniqueness errors are re-raised rather than misclassified.
+- The terminal loser has no candidate binding and consumes no validation rows. The winning run alone owns the candidate and the 30-row holdout ledger, preventing duplicate evaluation evidence without weakening the winner transaction.
+- The finalization RPC recognizes candidate-less terminal failures before requiring a candidate, allowing record-response uncertainty to resolve durably. Gateway reconciliation obtains the real active model for failed outcomes, matching production and fake-service behavior.
+- Promotion no longer treats malformed hashes as legacy. Controlled rows must match the exact PostgreSQL recomputation over persisted parameters, sorted train IDs, sorted validation IDs, and code version. Legacy behavior is fenced by explicit provenance populated for pre-migration rows and unavailable to service-role inserts.
+- Table-wide service-role `INSERT`/`UPDATE` privileges are revoked. Only RPC-required lifecycle/evidence columns remain writable, and immutable triggers reject changes to model ID, provenance, candidate binding, evidence IDs, metrics, hashes, and timestamps.
+- All four training RPCs remain `SECURITY INVOKER`, empty-search-path, explicit-`current_user` functions with execute denied to `PUBLIC`, `anon`, and `authenticated` and granted only to `service_role`.
+- The migration remains unapplied remotely. Task 2's original `private.promote_model(uuid, uuid)` signature and successful behavior are retained through explicit rollback-only legacy fixtures.
+
+### Changed files in fix round 2
+
+- `.superpowers/sdd/2026-09-24-football-live-product-implementation/task-6-report.md`
+- `football_live/repository.py`
+- `football_live/supabase_gateway.py`
+- `football_live/training.py`
+- `supabase/migrations/20260928153000_add_controlled_training.sql`
+- `supabase/tests/001_live_product_schema.sql`
+- `supabase/tests/002_controlled_training.sql`
+- `tests/test_repository.py`
+- `tests/test_training.py`
+
+### Remaining concern
+
+Python behavior and static SQL contracts are verified locally. The 67 pgTAP assertions still require execution in an approved isolated Supabase/PostgreSQL test environment before the unapplied migration is promoted.

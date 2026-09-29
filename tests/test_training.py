@@ -21,7 +21,6 @@ from football_live.training import (
 
 START = datetime(2026, 1, 1, tzinfo=timezone.utc)
 ACTIVE_ID = UUID("10000000-0000-0000-0000-000000000001")
-RUN_ID = UUID("20000000-0000-0000-0000-000000000001")
 CANDIDATE_ID = UUID("30000000-0000-0000-0000-000000000001")
 
 
@@ -179,6 +178,8 @@ class FakeTrainingRepository:
         self.events = []
         self.evaluations: list[CandidateEvaluation] = []
         self.promotion_outcome = "success"
+        self.record_outcome = "success"
+        self.last_run_id = None
 
     def recover_abandoned_training_evaluations(
         self, stale_after_seconds=900, limit=100
@@ -197,12 +198,25 @@ class FakeTrainingRepository:
     def active_model(self):
         return self.model
 
-    def record_training_evaluation(self, evaluation):
+    def record_training_evaluation(self, evaluation, run_id):
         self.events.append("record")
         self.evaluations.append(evaluation)
+        self.last_run_id = run_id
+        if self.record_outcome == "uncertain":
+            raise TimeoutError("record response was uncertain")
+        if self.record_outcome == "collision":
+            return TrainingRun(
+                id=run_id,
+                candidate_model_id=None,
+                status="failed",
+                train_fixture_ids=evaluation.train_fixture_ids,
+                validation_fixture_ids=evaluation.validation_fixture_ids,
+                parameter_hash=evaluation.parameter_hash,
+                active_model_id=self.model.id,
+            )
         self.consumed.update(evaluation.validation_fixture_ids)
         return TrainingRun(
-            id=RUN_ID,
+            id=run_id,
             candidate_model_id=CANDIDATE_ID,
             status="candidate" if evaluation.approved else "rejected",
             train_fixture_ids=evaluation.train_fixture_ids,
@@ -226,17 +240,17 @@ class FakeTrainingRepository:
 
     def finalize_training_evaluation(self, run_id):
         self.events.append("finalize")
-        assert run_id == RUN_ID
+        assert run_id == self.last_run_id
         if self.promotion_outcome == "committed":
             return TrainingRun(
-                id=RUN_ID,
+                id=run_id,
                 candidate_model_id=CANDIDATE_ID,
                 status="promoted",
                 parameter_hash=self.evaluations[0].parameter_hash,
                 active_model_id=CANDIDATE_ID,
             )
         return TrainingRun(
-            id=RUN_ID,
+            id=run_id,
             candidate_model_id=CANDIDATE_ID,
             status="failed",
             parameter_hash=self.evaluations[0].parameter_hash,
@@ -319,3 +333,33 @@ def test_service_finalizes_uncommitted_candidate_after_promotion_exception():
         "promote",
         "finalize",
     ]
+
+
+def test_service_reconciles_an_uncertain_record_by_its_preassigned_run_id():
+    repository = FakeTrainingRepository(
+        make_examples(),
+        make_active({"local": 0.6, "visitante": 0.6}),
+    )
+    repository.record_outcome = "uncertain"
+
+    result = TrainingService().run(repository, code_version="abc123")
+
+    assert result.status == "failed"
+    assert result.id == repository.last_run_id
+    assert result.active_model_id == ACTIVE_ID
+    assert repository.events == ["recover_abandoned", "record", "finalize"]
+
+
+def test_service_returns_a_terminal_record_collision_without_promotion():
+    repository = FakeTrainingRepository(
+        make_examples(),
+        make_active({"local": 0.6, "visitante": 0.6}),
+    )
+    repository.record_outcome = "collision"
+
+    result = TrainingService().run(repository, code_version="abc123")
+
+    assert result.status == "failed"
+    assert result.candidate_model_id is None
+    assert result.active_model_id == ACTIVE_ID
+    assert repository.events == ["recover_abandoned", "record"]

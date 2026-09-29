@@ -57,9 +57,11 @@ select throws_ok(
 reset role;
 
 -- Task 2 deliberately mutates malformed evidence to exercise promotion guards.
--- Production keeps both triggers enabled; only this rollback-only fixture disables them.
+-- Production keeps these triggers enabled; only this rollback-only fixture disables them.
+alter table private.model_versions disable trigger model_versions_canonical_insert;
 alter table private.model_versions disable trigger model_versions_immutable_evidence;
 alter table private.training_runs disable trigger training_runs_immutable_evidence;
+grant insert, update on private.model_versions, private.training_runs to service_role;
 
 set local role service_role;
 
@@ -216,13 +218,13 @@ where provider_fixture_id like 'test-valid-%'
 
 insert into private.model_versions (
   id, version, state, parameters, parameter_hash, code_version,
-  train_size, validation_size, brier, log_loss, activated_at
+  evidence_origin, train_size, validation_size, brier, log_loss, activated_at
 )
 values
-  ('10000000-0000-0000-0000-000000000001', 'baseline', 'active', '{}', 'hash-baseline', 'test-code', 70, 30, 0.40, 0.80, now()),
-  ('10000000-0000-0000-0000-000000000002', 'candidate-invalid', 'candidate', '{}', 'hash-invalid', 'test-code', 70, 30, 0.30, 0.70, null),
-  ('10000000-0000-0000-0000-000000000003', 'candidate-valid', 'candidate', '{}', 'hash-valid', 'test-code', 70, 30, 0.30, 0.70, null),
-  ('10000000-0000-0000-0000-000000000004', 'candidate-duplicate', 'candidate', '{}', 'hash-duplicate', 'test-code', 70, 30, 0.30, 0.70, null);
+  ('10000000-0000-0000-0000-000000000001', 'baseline', 'active', '{}', 'hash-baseline', 'test-code', 'legacy_task2', 70, 30, 0.40, 0.80, now()),
+  ('10000000-0000-0000-0000-000000000002', 'candidate-invalid', 'candidate', '{}', 'hash-invalid', 'test-code', 'legacy_task2', 70, 30, 0.30, 0.70, null),
+  ('10000000-0000-0000-0000-000000000003', 'candidate-valid', 'candidate', '{}', 'hash-valid', 'test-code', 'legacy_task2', 70, 30, 0.30, 0.70, null),
+  ('10000000-0000-0000-0000-000000000004', 'candidate-duplicate', 'candidate', '{}', 'hash-duplicate', 'test-code', 'legacy_task2', 70, 30, 0.30, 0.70, null);
 
 select throws_ok(
   $$
@@ -534,6 +536,8 @@ select is(
 );
 
 reset role;
+revoke insert, update on private.model_versions, private.training_runs from service_role;
+alter table private.model_versions enable trigger model_versions_canonical_insert;
 alter table private.model_versions enable trigger model_versions_immutable_evidence;
 alter table private.training_runs enable trigger training_runs_immutable_evidence;
 select * from finish();
