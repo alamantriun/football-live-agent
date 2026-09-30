@@ -19,4 +19,9 @@ def test_vercel_routes_keep_public_pages_and_api_in_the_same_origin():
 
     assert ("/app", "/app/index.html") in rewrites
     assert ("/modelo", "/modelo/index.html") in rewrites
-    assert ("/api/(.*)", "/api/index.py") in rewrites
+
+
+def test_api_requests_keep_their_original_path_for_fastapi_routing():
+    config = json.loads(Path("vercel.json").read_text(encoding="utf-8"))
+
+    assert not any(rule["source"] == "/api/(.*)" for rule in config["rewrites"])

@@ -8,8 +8,7 @@
   },
   "rewrites": [
     { "source": "/app", "destination": "/app/index.html" },
-    { "source": "/modelo", "destination": "/modelo/index.html" },
-    { "source": "/api/(.*)", "destination": "/api/index.py" }
+    { "source": "/modelo", "destination": "/modelo/index.html" }
   ],
   "headers": [
     {
