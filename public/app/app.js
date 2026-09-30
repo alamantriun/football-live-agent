@@ -4,7 +4,13 @@ const status = document.querySelector("#data-status");
 const refresh = document.querySelector("#refresh");
 const favoritesKey = "football-live-favorites";
 const states = ["loading", "empty", "fresh", "degraded", "stale", "suspended", "error"];
-const allowedLogoHosts = new Set(["imagecache.365scores.com", "img.365scores.com"]);
+const allowedLogoHosts = new Set(["imagecache.365scores.com", "img.365scores.com", "cdn.freebiesupply.com"]);
+const featuredClubLogos = new Map([
+  ["arsenal", "https://cdn.freebiesupply.com/logos/large/2x/arsenal-2-logo-png-transparent.png"],
+  ["arsenal fc", "https://cdn.freebiesupply.com/logos/large/2x/arsenal-2-logo-png-transparent.png"],
+  ["chelsea", "https://cdn.freebiesupply.com/logos/large/2x/chelsea-fc-2-logo-png-transparent.png"],
+  ["chelsea fc", "https://cdn.freebiesupply.com/logos/large/2x/chelsea-fc-2-logo-png-transparent.png"],
+]);
 const publicIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 let liveItems = [];
 let selectedId = null;
@@ -36,7 +42,8 @@ function safeLogo(url) {
 
 function clubMark(name, logoUrl) {
   const mark = element("span", "club-mark", initials(name));
-  const source = safeLogo(logoUrl);
+  const featured = featuredClubLogos.get(String(name || "").trim().toLowerCase());
+  const source = safeLogo(logoUrl) || safeLogo(featured);
   if (!source) return mark;
   const image = document.createElement("img");
   image.src = source;
@@ -75,9 +82,15 @@ function renderMatchList(items) {
     button.type = "button";
     button.setAttribute("aria-pressed", String(item.public_id === selectedId));
     button.setAttribute("aria-label", `${item.home_name} contra ${item.away_name}`);
-    const copy = element("span", "", `${item.home_name} vs ${item.away_name}`);
-    copy.append(element("small", "", item.competition || "Competición no disponible"));
-    button.append(copy, element("span", "", `${item.score_home ?? "—"} · ${item.score_away ?? "—"}`));
+    const copy = element("span", "match-copy");
+    const clubs = element("span", "match-clubs");
+    const home = element("span", "match-list-club");
+    home.append(clubMark(item.home_name, item.home_logo_url), element("span", "", item.home_name));
+    const away = element("span", "match-list-club away");
+    away.append(clubMark(item.away_name, item.away_logo_url), element("span", "", item.away_name));
+    clubs.append(home, element("span", "versus", "vs"), away);
+    copy.append(clubs, element("small", "", item.competition || "Competición no disponible"));
+    button.append(copy, element("span", "match-list-score", `${item.score_home ?? "—"} · ${item.score_away ?? "—"}`));
     button.addEventListener("click", () => loadMatch(item.public_id));
     list.append(button);
   });

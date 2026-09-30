@@ -23,6 +23,7 @@ def test_dashboard_has_a_safe_same_origin_live_data_contract():
 
 def test_dashboard_declares_all_live_data_states_and_safe_logo_fallback():
     javascript = (APP / "app.js").read_text(encoding="utf-8")
+    css = (APP / "app.css").read_text(encoding="utf-8")
 
     for state in ("loading", "empty", "fresh", "degraded", "stale", "suspended", "error"):
         assert f'"{state}"' in javascript
@@ -30,3 +31,9 @@ def test_dashboard_declares_all_live_data_states_and_safe_logo_fallback():
     assert "https:" in javascript
     assert "loading" in javascript
     assert "localStorage" in javascript
+    assert "featuredClubLogos" in javascript
+    assert "cdn.freebiesupply.com" in javascript
+    match_list = javascript.split("function renderMatchList", 1)[1].split("function probabilityCard", 1)[0]
+    assert "clubMark(item.home_name, item.home_logo_url)" in match_list
+    assert "clubMark(item.away_name, item.away_logo_url)" in match_list
+    assert ".match-clubs" in css

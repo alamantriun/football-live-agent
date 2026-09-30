@@ -27,3 +27,12 @@ def test_landing_uses_local_assets_and_accessible_motion_controls():
     assert "onerror=" not in html.lower()
     assert (PUBLIC / "assets" / "football-players-white-kits.png").is_file()
     assert (PUBLIC / "assets" / "fonts" / "README.md").is_file()
+
+
+def test_landing_demo_uses_real_arsenal_and_chelsea_crests():
+    html = (PUBLIC / "index.html").read_text(encoding="utf-8")
+
+    assert 'alt="Escudo del Arsenal"' in html
+    assert 'alt="Escudo del Chelsea"' in html
+    assert "cdn.freebiesupply.com/logos/large/2x/arsenal-2-logo-png-transparent.png" in html
+    assert "cdn.freebiesupply.com/logos/large/2x/chelsea-fc-2-logo-png-transparent.png" in html
