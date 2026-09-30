@@ -165,7 +165,6 @@ class SupabaseGateway:
             .table("outcomes")
             .upsert(payload, on_conflict="fixture_id")
             .select("fixture_id")
-            .limit(1)
             .execute()
         )
         closed = fixture.model_copy(
@@ -203,7 +202,6 @@ class SupabaseGateway:
             .table("live_snapshots")
             .upsert(payload, on_conflict="fixture_id,observation_bucket")
             .select("id")
-            .limit(1)
             .execute()
         )
         return self._inserted_id(response)
@@ -226,7 +224,6 @@ class SupabaseGateway:
             .table("predictions")
             .upsert(payload, on_conflict="snapshot_id,model_version_id")
             .select("id")
-            .limit(1)
             .execute()
         )
         return self._inserted_id(response)

@@ -33,6 +33,16 @@ class FakeResponse:
         self.data = [] if data is None else data
 
 
+class FakeWriteSelectQuery:
+    """Mirror postgrest-py's write-select builder, which has no limit()."""
+
+    def __init__(self, query):
+        self.query = query
+
+    def execute(self):
+        return self.query.execute()
+
+
 class FakeQuery:
     def __init__(self, client, schema, kind, name, params=None):
         self.client = client
@@ -45,6 +55,8 @@ class FakeQuery:
 
     def select(self, columns):
         self.operation["select"] = columns
+        if "payload" in self.operation:
+            return FakeWriteSelectQuery(self)
         return self
 
     def upsert(self, payload, *, on_conflict):
@@ -424,6 +436,7 @@ def test_fixture_upsert_uses_private_schema_conflict_and_canonical_payload(
 
     operation = fake_client.operations[-1]
     assert operation["schema"] == "private"
+    assert "limit" not in operation
     assert operation["name"] == "fixtures"
     assert operation["on_conflict"] == "provider,provider_fixture_id"
     assert operation["payload"] == [
@@ -532,7 +545,6 @@ def test_prediction_write_uses_only_canonical_private_payload(
         },
         "on_conflict": "snapshot_id,model_version_id",
         "select": "id",
-        "limit": 1,
     }
 
 
@@ -735,7 +747,6 @@ def test_confirmed_outcome_is_upserted_before_fixture_is_closed(
         },
         "on_conflict": "fixture_id",
         "select": "fixture_id",
-        "limit": 1,
     }
     assert closed_fixture["name"] == "fixtures"
     assert closed_fixture["payload"][0]["status"] == "finished"
