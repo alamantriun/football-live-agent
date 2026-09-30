@@ -350,6 +350,35 @@ async def test_collect_caps_at_12_uses_concurrency_two_and_skips_stale_sentinel(
 
 
 @pytest.mark.asyncio
+async def test_collect_reports_the_processing_stage_without_exposing_error_details():
+    repo = FakeRepository()
+    fixture = make_fixture(1)
+    repo.fixtures = [fixture]
+    provider = FakeProvider(
+        snapshots={fixture.provider_fixture_id: make_provider_snapshot(fixture)}
+    )
+    predictor = FakePredictor()
+
+    def fail_snapshot_store(_snapshot):
+        raise RuntimeError("private provider payload must not appear in counters")
+
+    repo.store_snapshot = fail_snapshot_store
+
+    result = await run_collect(
+        repo,
+        provider,
+        predictor,
+        HTTP_REQUEST_ID,
+        "collect:processing-stage",
+    )
+
+    assert result.counters["processing_errors"] == 1
+    assert result.counters["processing_error_stages"] == {"snapshot_store": 1}
+    assert "private provider payload" not in str(result.counters)
+    assert predictor.calls == []
+
+
+@pytest.mark.asyncio
 async def test_settle_caps_at_30_confirms_finals_and_flags_corrections_for_review():
     repo = FakeRepository()
     repo.unfinished = [make_fixture(index) for index in range(35)]

@@ -188,13 +188,16 @@ async def run_collect(repo, provider, predictor, request_id: UUID, key: str) -> 
                     counters["skipped_predictions"] += 1
                     return
 
+                stage = "snapshot_build"
                 try:
                     snapshot = _snapshot_from_provider(fixture, provider_snapshot)
+                    stage = "snapshot_store"
                     snapshot_id = repo.store_snapshot(snapshot)
                     counters["snapshots"] += 1
                     persisted_snapshot = snapshot.model_copy(
                         update={"id": snapshot_id}
                     )
+                    stage = "prediction"
                     prediction = predictor.predict(persisted_snapshot, active_model)
                     if (
                         not prediction.probabilities
@@ -202,10 +205,13 @@ async def run_collect(repo, provider, predictor, request_id: UUID, key: str) -> 
                     ):
                         counters["skipped_predictions"] += 1
                         return
+                    stage = "prediction_store"
                     repo.store_prediction(prediction)
                     counters["predictions"] += 1
                 except Exception:
                     counters["processing_errors"] += 1
+                    stage_counts = counters.setdefault("processing_error_stages", {})
+                    stage_counts[stage] = stage_counts.get(stage, 0) + 1
 
         await asyncio.gather(*(collect_one(fixture) for fixture in fixtures))
         return "succeeded", counters, None
