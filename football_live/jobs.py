@@ -160,6 +160,7 @@ async def run_collect(repo, provider, predictor, request_id: UUID, key: str) -> 
             "selected": len(fixtures),
             "snapshots": 0,
             "predictions": 0,
+            "published": 0,
             "skipped_predictions": 0,
             "provider_errors": 0,
             "processing_errors": 0,
@@ -208,6 +209,14 @@ async def run_collect(repo, provider, predictor, request_id: UUID, key: str) -> 
                     stage = "prediction_store"
                     repo.store_prediction(prediction)
                     counters["predictions"] += 1
+                    stage = "projection_store"
+                    repo.publish_live_prediction(
+                        fixture,
+                        persisted_snapshot,
+                        prediction,
+                        active_model,
+                    )
+                    counters["published"] += 1
                 except Exception:
                     counters["processing_errors"] += 1
                     stage_counts = counters.setdefault("processing_error_stages", {})

@@ -36,6 +36,14 @@ class Repository(Protocol):
 
     def store_prediction(self, prediction: PredictionRecord) -> UUID: ...
 
+    def publish_live_prediction(
+        self,
+        fixture: Fixture,
+        snapshot: LiveSnapshot,
+        prediction: PredictionRecord,
+        model: ModelVersion,
+    ) -> None: ...
+
     def active_model(self) -> ModelVersion: ...
 
     def training_examples(self, limit: int = 1000) -> list[TrainingExample]: ...

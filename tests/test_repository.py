@@ -548,6 +548,46 @@ def test_prediction_write_uses_only_canonical_private_payload(
     }
 
 
+def test_live_prediction_publication_uses_only_the_safe_projection(
+    gateway, fake_client, fixture, snapshot, prediction, model_row
+):
+    model = ModelVersion.model_validate(model_row)
+
+    gateway.publish_live_prediction(fixture, snapshot, prediction, model)
+
+    operation = fake_client.operations[-1]
+    assert operation == {
+        "schema": "public",
+        "kind": "table",
+        "name": "live_match_projection",
+        "params": None,
+        "payload": {
+            "public_id": str(fixture.public_id),
+            "competition": "Premier League",
+            "home_name": "Arsenal",
+            "away_name": "Chelsea",
+            "home_logo_url": "https://cdn.example/arsenal.png",
+            "away_logo_url": None,
+            "scheduled_at": "2026-09-24T20:00:00Z",
+            "status": "live",
+            "minute": 63,
+            "score_home": 1,
+            "score_away": 1,
+            "data_status": "fresh",
+            "provider_observed_at": "2026-09-24T20:03:44Z",
+            "collected_at": None,
+            "probabilities": {"home": 45.0, "draw": 30.0, "away": 25.0},
+            "explanation": {"signals": ["shots_on_target"]},
+            "model_version": "2026.09.24.1",
+            "prediction_created_at": None,
+            "updated_at": "2026-09-24T20:03:44Z",
+        },
+        "on_conflict": "public_id",
+    }
+    assert "provider_fixture_id" not in operation["payload"]
+    assert "sanitized_provider_data" not in operation["payload"]
+
+
 def test_active_model_uses_private_schema_and_returns_strict_model(
     gateway, fake_client, model_row
 ):
@@ -586,6 +626,7 @@ def test_public_live_uses_public_schema_bounded_columns_and_caps_limit(
     operation = fake_client.operations[-1]
     assert operation["schema"] == "public"
     assert operation["name"] == "live_matches"
+    assert operation["filters"] == [("eq", "status", "live")]
     assert operation["limit"] == 50
     assert operation["select"] != "*"
     assert "sanitized_provider_data" not in operation["select"]
@@ -600,6 +641,7 @@ def test_public_live_applies_cursor_and_clamps_nonpositive_limit(
     operation = fake_client.operations[-1]
     assert operation["schema"] == "public"
     assert operation["filters"] == [
+        ("eq", "status", "live"),
         ("lt", "updated_at", "2026-09-24T20:03:00Z")
     ]
     assert operation["order"] == ("updated_at", True)

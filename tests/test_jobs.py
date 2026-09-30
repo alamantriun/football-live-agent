@@ -109,6 +109,7 @@ class FakeRepository:
         self.upserted = []
         self.snapshots = []
         self.predictions = []
+        self.published_predictions = []
         self.outcomes = []
         self.reviews = []
         self.model = make_active_model()
@@ -138,6 +139,9 @@ class FakeRepository:
     def store_prediction(self, prediction):
         self.predictions.append(prediction)
         return UUID(int=40_000 + len(self.predictions))
+
+    def publish_live_prediction(self, fixture, snapshot, prediction, model):
+        self.published_predictions.append((fixture, snapshot, prediction, model))
 
     def active_model(self):
         return self.model
@@ -336,11 +340,13 @@ async def test_collect_caps_at_12_uses_concurrency_two_and_skips_stale_sentinel(
     assert provider.max_active == 2
     assert len(repo.snapshots) == 11
     assert len(repo.predictions) == 10
+    assert len(repo.published_predictions) == 10
     assert all(prediction.probabilities for prediction in repo.predictions)
     assert result.counters == {
         "selected": 12,
         "snapshots": 11,
         "predictions": 10,
+        "published": 10,
         "skipped_predictions": 1,
         "provider_errors": 1,
         "processing_errors": 0,
@@ -376,6 +382,35 @@ async def test_collect_reports_the_processing_stage_without_exposing_error_detai
     assert result.counters["processing_error_stages"] == {"snapshot_store": 1}
     assert "private provider payload" not in str(result.counters)
     assert predictor.calls == []
+
+
+@pytest.mark.asyncio
+async def test_collect_reports_projection_store_failures_after_private_prediction_is_saved():
+    repo = FakeRepository()
+    fixture = make_fixture(1)
+    repo.fixtures = [fixture]
+    provider = FakeProvider(
+        snapshots={fixture.provider_fixture_id: make_provider_snapshot(fixture)}
+    )
+
+    def fail_projection(*_args):
+        raise RuntimeError("private projection failure details")
+
+    repo.publish_live_prediction = fail_projection
+
+    result = await run_collect(
+        repo,
+        provider,
+        FakePredictor(),
+        HTTP_REQUEST_ID,
+        "collect:projection-stage",
+    )
+
+    assert len(repo.predictions) == 1
+    assert result.counters["predictions"] == 1
+    assert result.counters["published"] == 0
+    assert result.counters["processing_error_stages"] == {"projection_store": 1}
+    assert "private projection failure details" not in str(result.counters)
 
 
 @pytest.mark.asyncio

@@ -228,6 +228,57 @@ class SupabaseGateway:
         )
         return self._inserted_id(response)
 
+    def publish_live_prediction(
+        self,
+        fixture: Fixture,
+        snapshot: LiveSnapshot,
+        prediction: PredictionRecord,
+        model: ModelVersion,
+    ) -> None:
+        if fixture.public_id is None or fixture.id is None or snapshot.id is None:
+            raise ValueError("persisted fixture and snapshot are required")
+        if (
+            snapshot.fixture_id != fixture.id
+            or prediction.fixture_id != fixture.id
+            or prediction.snapshot_id != snapshot.id
+            or prediction.model_version_id != model.id
+        ):
+            raise ValueError("projection inputs must describe the same prediction")
+
+        fixture_data = fixture.model_dump(mode="json")
+        snapshot_data = snapshot.model_dump(mode="json")
+        prediction_data = prediction.model_dump(mode="json")
+        payload = {
+            "public_id": fixture_data["public_id"],
+            "competition": fixture_data["competition"],
+            "home_name": fixture_data["home_name"],
+            "away_name": fixture_data["away_name"],
+            "home_logo_url": fixture_data["home_logo_url"],
+            "away_logo_url": fixture_data["away_logo_url"],
+            "scheduled_at": fixture_data["scheduled_at"],
+            "status": fixture_data["status"],
+            "minute": snapshot_data["minute"],
+            "score_home": snapshot_data["score_home"],
+            "score_away": snapshot_data["score_away"],
+            "data_status": prediction_data["quality"],
+            "provider_observed_at": snapshot_data["provider_observed_at"],
+            "collected_at": snapshot_data["collected_at"],
+            "probabilities": prediction_data["probabilities"],
+            "explanation": prediction_data["explanation"],
+            "model_version": model.version,
+            "prediction_created_at": prediction_data["created_at"],
+            "updated_at": (
+                prediction_data["created_at"]
+                or snapshot_data["provider_observed_at"]
+            ),
+        }
+        self._execute(
+            lambda: self._client.schema("public")
+            .table("live_match_projection")
+            .upsert(payload, on_conflict="public_id")
+            .execute()
+        )
+
     def active_model(self) -> ModelVersion:
         response = self._execute(
             lambda: self._client.schema("private")
@@ -442,6 +493,7 @@ class SupabaseGateway:
                 self._client.schema("public")
                 .table("live_matches")
                 .select(PUBLIC_LIVE_SELECT)
+                .eq("status", "live")
                 .order("updated_at", desc=True)
             )
             if cursor is not None:

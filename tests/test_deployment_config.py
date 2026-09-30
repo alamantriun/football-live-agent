@@ -51,3 +51,17 @@ def test_scheduled_collection_reads_its_origin_and_secret_from_vault():
     assert "football_cron_secret" in migration
     assert "X-Cron-Secret" in migration
     assert "football-live-agent.vercel.app" not in migration
+
+
+def test_live_predictions_are_published_and_removed_when_a_match_stops_being_live():
+    migrations = list(Path("supabase/migrations").glob("*publish_live_predictions.sql"))
+
+    assert len(migrations) == 1
+    migration = migrations[0].read_text(encoding="utf-8")
+    assert "create function private.publish_live_match_prediction" in migration
+    assert "after insert or update on private.predictions" in migration
+    assert "after update of status" in migration
+    assert "and f.status = 'live'" in migration
+    assert "delete from public.live_match_projection" in migration
+    assert "security definer" in migration
+    assert "set search_path = ''" in migration
