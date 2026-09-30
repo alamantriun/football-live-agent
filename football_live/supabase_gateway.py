@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -124,10 +125,65 @@ class SupabaseGateway:
             .table("fixtures")
             .select(FIXTURE_SELECT)
             .eq("status", "live")
-            .limit(self._cap(limit, 100))
+            .limit(self._cap(limit, 12))
             .execute()
         )
         return [Fixture.model_validate(row) for row in self._rows(response)]
+
+    def unfinished_fixtures(self, limit: int = 30) -> list[Fixture]:
+        response = self._execute(
+            lambda: self._client.schema("private")
+            .table("fixtures")
+            .select(FIXTURE_SELECT)
+            .is_("finished_at", "null")
+            .order("scheduled_at")
+            .limit(self._cap(limit, 30))
+            .execute()
+        )
+        return [Fixture.model_validate(row) for row in self._rows(response)]
+
+    def store_confirmed_outcome(
+        self,
+        fixture: Fixture,
+        home_score: int,
+        away_score: int,
+        confirmed_at: datetime,
+        source: str,
+    ) -> None:
+        if fixture.id is None:
+            raise ValueError("persisted fixture is required")
+        payload = {
+            "fixture_id": str(fixture.id),
+            "home_score": home_score,
+            "away_score": away_score,
+            "source": source,
+            "confirmed": True,
+            "confirmed_at": confirmed_at.isoformat(),
+        }
+        self._execute(
+            lambda: self._client.schema("private")
+            .table("outcomes")
+            .upsert(payload, on_conflict="fixture_id")
+            .select("fixture_id")
+            .limit(1)
+            .execute()
+        )
+        closed = fixture.model_copy(
+            update={
+                "status": "finished",
+                "final_home": home_score,
+                "final_away": away_score,
+                "finished_at": confirmed_at,
+            }
+        )
+        self.upsert_fixtures([closed])
+
+    def flag_fixture_review(self, fixture: Fixture, reason: str) -> None:
+        if fixture.id is None:
+            raise ValueError("persisted fixture is required")
+        if reason != "provider_score_correction":
+            raise ValueError("unsupported review reason")
+        self.upsert_fixtures([fixture.model_copy(update={"status": "review"})])
 
     def store_snapshot(self, snapshot: LiveSnapshot) -> UUID:
         dumped = snapshot.model_dump(mode="json")

@@ -64,6 +64,10 @@ class FakeQuery:
         self.operation.setdefault("filters", []).append(("lt", column, value))
         return self
 
+    def is_(self, column, value):
+        self.operation.setdefault("filters", []).append(("is", column, value))
+        return self
+
     def order(self, column, *, desc=False):
         self.operation["order"] = (column, desc)
         return self
@@ -466,7 +470,7 @@ def test_active_fixtures_uses_private_schema_bounded_select_and_limit(
             "final_away,discovered_at,updated_at,finished_at"
         ),
         "filters": [("eq", "status", "live")],
-        "limit": 100,
+        "limit": 12,
     }
 
 
@@ -670,6 +674,91 @@ def test_job_rpcs_use_private_schema_and_exact_fencing_parameters(
             "p_sanitized_error": "provider_unavailable",
         },
     }
+
+
+def test_unfinished_fixtures_are_bounded_and_selected_from_private_schema(
+    gateway, fake_client, fixture
+):
+    fake_client.responses[("private", "table", "fixtures")] = [
+        fixture.model_dump(mode="json")
+    ]
+
+    assert gateway.unfinished_fixtures(limit=500) == [fixture]
+
+    assert fake_client.operations[-1] == {
+        "schema": "private",
+        "kind": "table",
+        "name": "fixtures",
+        "params": None,
+        "select": (
+            "id,public_id,provider,provider_fixture_id,competition,home_name,away_name,"
+            "home_logo_url,away_logo_url,scheduled_at,status,final_home,final_away,"
+            "discovered_at,updated_at,finished_at"
+        ),
+        "filters": [("is", "finished_at", "null")],
+        "order": ("scheduled_at", False),
+        "limit": 30,
+    }
+
+
+def test_confirmed_outcome_is_upserted_before_fixture_is_closed(
+    gateway, fake_client, fixture
+):
+    fake_client.responses[("private", "table", "outcomes")] = [
+        {"fixture_id": str(FIXTURE_ID)}
+    ]
+    fake_client.responses[("private", "table", "fixtures")] = [
+        {"id": str(FIXTURE_ID)}
+    ]
+
+    gateway.store_confirmed_outcome(
+        fixture,
+        home_score=2,
+        away_score=1,
+        confirmed_at=OBSERVED_AT,
+        source="365scores",
+    )
+
+    outcome, closed_fixture = fake_client.operations[-2:]
+    assert outcome == {
+        "schema": "private",
+        "kind": "table",
+        "name": "outcomes",
+        "params": None,
+        "payload": {
+            "fixture_id": str(FIXTURE_ID),
+            "home_score": 2,
+            "away_score": 1,
+            "source": "365scores",
+            "confirmed": True,
+            "confirmed_at": OBSERVED_AT.isoformat(),
+        },
+        "on_conflict": "fixture_id",
+        "select": "fixture_id",
+        "limit": 1,
+    }
+    assert closed_fixture["name"] == "fixtures"
+    assert closed_fixture["payload"][0]["status"] == "finished"
+    assert closed_fixture["payload"][0]["final_home"] == 2
+    assert closed_fixture["payload"][0]["final_away"] == 1
+    assert closed_fixture["payload"][0]["finished_at"] == "2026-09-24T20:03:44Z"
+
+
+def test_disputed_correction_marks_fixture_for_review_without_writing_outcome(
+    gateway, fake_client, fixture
+):
+    fake_client.responses[("private", "table", "fixtures")] = [
+        {"id": str(FIXTURE_ID)}
+    ]
+
+    gateway.flag_fixture_review(fixture, "provider_score_correction")
+
+    operation = fake_client.operations[-1]
+    assert operation["name"] == "fixtures"
+    assert operation["payload"][0]["status"] == "review"
+    assert operation["payload"][0]["final_home"] is None
+    assert operation["payload"][0]["finished_at"] is None
+    assert all(item["name"] != "outcomes" for item in fake_client.operations)
 
 
 def test_transport_failure_is_sanitized_and_chained(gateway, fake_client):

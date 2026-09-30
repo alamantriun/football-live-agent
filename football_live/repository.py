@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING, Protocol, Sequence
 from uuid import UUID
 
@@ -17,6 +18,19 @@ class Repository(Protocol):
     def upsert_fixtures(self, fixtures: Sequence[Fixture]) -> int: ...
 
     def active_fixtures(self, limit: int = 12) -> list[Fixture]: ...
+
+    def unfinished_fixtures(self, limit: int = 30) -> list[Fixture]: ...
+
+    def store_confirmed_outcome(
+        self,
+        fixture: Fixture,
+        home_score: int,
+        away_score: int,
+        confirmed_at: datetime,
+        source: str,
+    ) -> None: ...
+
+    def flag_fixture_review(self, fixture: Fixture, reason: str) -> None: ...
 
     def store_snapshot(self, snapshot: LiveSnapshot) -> UUID: ...
 
