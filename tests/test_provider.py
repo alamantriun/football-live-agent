@@ -163,7 +163,7 @@ def test_partial_snapshot_preserves_missing_stats_and_real_zero():
     assert snapshot.quality == "degraded"
 
 
-def test_live_list_uses_canonical_home_and_away_fields():
+def test_live_list_uses_canonical_fields_and_internal_live_status():
     fixtures = ProviderAdapter().parse_live_list(load_fixture("live_list.json"))
 
     assert len(fixtures) == 1
@@ -171,6 +171,7 @@ def test_live_list_uses_canonical_home_and_away_fields():
     assert fixtures[0].home_name == "Club Norte"
     assert fixtures[0].away_name == "Club Sur"
     assert fixtures[0].competition == "Liga de prueba"
+    assert fixtures[0].status == "live"
 
 
 @pytest.mark.asyncio

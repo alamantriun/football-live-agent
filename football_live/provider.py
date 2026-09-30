@@ -264,7 +264,7 @@ class ProviderAdapter:
                     home_logo_url=home.get("logo"),
                     away_logo_url=away.get("logo"),
                     scheduled_at=_parse_datetime(game.get("startTime")),
-                    status=str(game.get("statusText") or "live"),
+                    status="live",
                 )
             )
         return fixtures
