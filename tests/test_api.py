@@ -155,6 +155,15 @@ def test_model_status_and_health_are_public_and_do_not_expose_docs(client):
     assert client.get("/openapi.json").status_code == 404
 
 
+def test_public_api_responses_are_short_lived_but_internal_jobs_are_not_cached(client):
+    live = client.get("/api/live")
+    model = client.get("/api/model/status")
+    health = client.get("/api/health")
+
+    for response in (live, model, health):
+        assert response.headers["Cache-Control"] == "public, max-age=0, s-maxage=15, stale-while-revalidate=30"
+
+
 def test_internal_job_rejects_missing_secret(client):
     response = client.post(
         "/api/jobs/discover", headers={"X-Idempotency-Key": "discover:1"}

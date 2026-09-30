@@ -2,6 +2,29 @@
 
 Análisis de fútbol con extractores en vivo, dashboards de terminal y web, y predicciones probabilísticas experimentales.
 
+## Producto web público
+
+La experiencia pública se sirve desde una misma aplicación y no requiere cuenta:
+
+- `/`: presentación del producto y una explicación de las lecturas en vivo.
+- `/app`: partidos publicados, calidad de datos y probabilidades 1X2 disponibles.
+- `/modelo`: evidencia, tamaños de muestra, métricas y límites del modelo.
+- `/api/health`, `/api/live`, `/api/matches/{public_id}` y `/api/model/status`: API pública de solo lectura.
+
+El navegador no consulta proveedores deportivos ni Supabase directamente. Las rutas internas de recolección sólo aceptan llamadas autenticadas por un secreto de servidor, con claves de idempotencia.
+
+### Producción
+
+Vercel detecta `api/index.py` como una función FastAPI y publica `public/**` como archivos estáticos. Antes del primer despliegue, crear en Vercel exclusivamente como variables de servidor para Preview y Production: `ENVIRONMENT=production`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET`, `ALLOWED_HOSTS` y `PUBLIC_ORIGIN`. Ninguna debe usar un prefijo público ni llegar a Git.
+
+Una vez que Vercel muestre una Preview `Ready`, ejecutar:
+
+```powershell
+python scripts/smoke_preview.py --base-url https://URL-DE-LA-PREVIEW
+```
+
+Después de una prueba satisfactoria, promover a Production y programar los trabajos en Supabase. La secuencia operativa y el procedimiento de reversión están en [docs/operations.md](docs/operations.md).
+
 ## Estado de la predicción
 
 La revisión estadística y el plan aplicado están en [docs/REVISION_Y_PLAN.md](docs/REVISION_Y_PLAN.md).

@@ -110,8 +110,18 @@ def _request_id(request: Request) -> UUID:
     return request_id if isinstance(request_id, UUID) else uuid4()
 
 
-def _json(status_code: int, content: StrictDomainModel, *, no_store: bool = False) -> JSONResponse:
-    headers = {"Cache-Control": "no-store"} if no_store else None
+def _json(
+    status_code: int,
+    content: StrictDomainModel,
+    *,
+    no_store: bool = False,
+    public_cache: bool = False,
+) -> JSONResponse:
+    headers = None
+    if no_store:
+        headers = {"Cache-Control": "no-store"}
+    elif public_cache:
+        headers = {"Cache-Control": "public, max-age=0, s-maxage=15, stale-while-revalidate=30"}
     return JSONResponse(status_code=status_code, content=content.model_dump(mode="json"), headers=headers)
 
 
@@ -237,7 +247,7 @@ def create_app(
             data_status=_response_status(items),
             model_version=versions.pop() if len(versions) == 1 else None,
             items=items,
-        ))
+        ), public_cache=True)
 
     @app.get("/api/matches/{public_id}", response_model=MatchEnvelope)
     async def match(public_id: UUID, request: Request) -> JSONResponse:
@@ -251,7 +261,7 @@ def create_app(
             data_status=item.data_status,
             model_version=item.model_version,
             item=item,
-        ))
+        ), public_cache=True)
 
     @app.get("/api/model/status", response_model=ModelStatusEnvelope)
     async def model_status(request: Request) -> JSONResponse:
@@ -264,11 +274,15 @@ def create_app(
             generated_at=_now(),
             model_version=model.version,
             model=model,
-        ))
+        ), public_cache=True)
 
     @app.get("/api/health", response_model=HealthEnvelope)
     async def health(request: Request) -> JSONResponse:
-        return _json(200, HealthEnvelope(request_id=_request_id(request), generated_at=_now()))
+        return _json(
+            200,
+            HealthEnvelope(request_id=_request_id(request), generated_at=_now()),
+            public_cache=True,
+        )
 
     async def run_job(request: Request, job_name: str) -> JSONResponse:
         key = await _require_job_request(request, settings)

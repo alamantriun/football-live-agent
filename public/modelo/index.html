@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#09120f">
+    <meta name="description" content="Estado, evidencia y límites del modelo de Football Live Agent.">
+    <title>Modelo y evidencia — Football Live Agent</title>
+    <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/modelo/modelo.css">
+  </head>
+  <body>
+    <header class="page-header">
+      <a class="brand" href="/"><span>FL</span> Football <b>Live Agent</b></a>
+      <nav aria-label="Navegación principal"><a href="/">Producto</a><a href="/app">Partidos en vivo</a></nav>
+    </header>
+    <main>
+      <section class="model-intro" aria-labelledby="page-title">
+        <p class="eyebrow">Transparencia del producto</p>
+        <h1 id="page-title">El modelo también<br><em>muestra sus límites.</em></h1>
+        <p>Una probabilidad no es una promesa. Aquí publicamos el estado de la evidencia, los criterios de promoción y las métricas disponibles sin convertir datos incompletos en certeza.</p>
+      </section>
+
+      <section class="status-statement" aria-labelledby="status-title" aria-live="polite">
+        <p class="eyebrow">Estado actual</p>
+        <h2 id="status-title" data-model-state>Evidencia live todavía en recolección</h2>
+        <p data-model-summary>El sistema conserva lecturas y resultados confirmados antes de evaluar una versión candidata.</p>
+      </section>
+
+      <section class="gates" aria-label="Criterios mínimos de aprendizaje">
+        <article><span>Entrenamiento mínimo</span><strong>70</strong><p>partidos anteriores, separados en el tiempo.</p></article>
+        <article><span>Validación mínima</span><strong>30</strong><p>partidos posteriores y no usados para ajustar.</p></article>
+        <article><span>Promoción</span><strong>2</strong><p>métricas deben mejorar frente al activo y al comparador.</p></article>
+      </section>
+
+      <section class="evidence-grid">
+        <article class="model-record">
+          <p class="eyebrow">Versión publicada</p>
+          <h2 data-model-version>Faltan datos verificados</h2>
+          <dl>
+            <div><dt>Entrenamiento</dt><dd data-train-size>Faltan datos verificados</dd></div>
+            <div><dt>Validación</dt><dd data-validation-size>Faltan datos verificados</dd></div>
+            <div><dt>Última decisión</dt><dd data-last-decision>En espera de evidencia suficiente</dd></div>
+            <div><dt>Actualización</dt><dd data-updated-at>Dato no disponible</dd></div>
+          </dl>
+        </article>
+        <article class="metrics" aria-labelledby="metrics-title">
+          <p class="eyebrow">Dos métricas, una condición</p>
+          <h2 id="metrics-title">Menos error es mejor.</h2>
+          <div class="metric"><span>Brier</span><strong data-brier>Faltan datos verificados</strong><p>Mide qué tan cerca quedan las probabilidades de lo que finalmente ocurre.</p></div>
+          <div class="metric"><span>Log loss</span><strong data-log-loss>Faltan datos verificados</strong><p>Penaliza especialmente asignar mucha confianza a un resultado que no sucede.</p></div>
+        </article>
+      </section>
+
+      <section class="limits" aria-labelledby="limits-title">
+        <p class="eyebrow">Cómo leer esta página</p>
+        <h2 id="limits-title">La evidencia histórica no certifica el desempeño en vivo.</h2>
+        <p>El antecedente prepartido se evaluó de forma cronológica y es útil como comparador. No demuestra precisión live ni se generaliza automáticamente a otras ligas, temporadas o contextos de partido.</p>
+        <a href="/app">Ver lecturas disponibles <span aria-hidden="true">→</span></a>
+      </section>
+    </main>
+    <script src="/modelo/modelo.js" defer></script>
+  </body>
+</html>
