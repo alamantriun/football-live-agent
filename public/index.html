@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#09120f">
+    <meta name="description" content="Lecturas de fútbol en vivo con probabilidades explicables y evidencia visible.">
+    <title>Football Live Agent — lectura en vivo</title>
+    <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/assets/site.css">
+    <link rel="stylesheet" href="/assets/landing-overrides.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#hero" aria-label="Football Live Agent, inicio">
+        <span class="brand-mark" aria-hidden="true">FL</span>
+        <span>Football <b>Live Agent</b></span>
+      </a>
+      <nav aria-label="Navegación principal">
+        <a href="#como-funciona">Cómo funciona</a>
+        <a href="#evidencia">Transparencia</a>
+        <a class="nav-action" href="/app">Ver partidos en vivo <span aria-hidden="true">↗</span></a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero" id="hero" aria-labelledby="hero-title">
+        <div class="hero-copy reveal">
+          <p class="kicker"><span aria-hidden="true"></span> Fútbol en vivo, con contexto</p>
+          <h1 id="hero-title">Cada minuto<br>cuenta una <em>historia nueva.</em></h1>
+          <p class="hero-lead">Transformamos señales en vivo —marcador, tiempo, ataques y presión— en probabilidades actualizadas y explicables. Cada lectura muestra su versión, datos y desempeño disponible.</p>
+          <div class="hero-actions">
+            <a class="button primary" href="/app">Explorar partidos <span aria-hidden="true">→</span></a>
+            <a class="button text" href="/modelo">Ver el modelo <span aria-hidden="true">↗</span></a>
+          </div>
+          <p class="hero-note">Producto experimental. Las probabilidades expresan incertidumbre; no garantizan resultados.</p>
+        </div>
+        <div class="hero-visual reveal" aria-hidden="true">
+          <div class="orb orb-one"></div>
+          <div class="orb orb-two"></div>
+          <div class="radar"><span></span><span></span><span></span></div>
+          <img src="/assets/football-players-white-kits.png" alt="" width="1200" height="1334">
+          <div class="signal-card"><span class="signal-dot"></span><strong>LECTURA ACTIVA</strong><small>señales actualizadas</small></div>
+        </div>
+      </section>
+
+      <section class="reading" id="live-reading" aria-labelledby="reading-title">
+        <div class="section-intro reveal">
+          <p class="kicker">Una lectura, no una promesa</p>
+          <h2 id="reading-title">El marcador explica poco.<br><span>El partido explica más.</span></h2>
+        </div>
+        <div class="reading-grid">
+          <article class="reading-statement reveal">
+            <p>Una probabilidad útil no aparece una sola vez antes de empezar. Cambia cuando cambia el juego y conserva el contexto que la sostiene.</p>
+            <a href="#como-funciona">Conocer el método <span aria-hidden="true">↓</span></a>
+          </article>
+          <div class="signal-list reveal" aria-label="Señales que se observan durante un partido">
+            <div><span class="signal-number">Tiempo</span><strong>Minuto, fase y marcador actual</strong></div>
+            <div><span class="signal-number">Acción</span><strong>Remates, posesión, presión y señales disponibles</strong></div>
+            <div><span class="signal-number">Evidencia</span><strong>Calidad del dato y versión que produjo la lectura</strong></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="demo" aria-labelledby="demo-title">
+        <div class="demo-heading reveal">
+          <p class="kicker">Demostración ilustrativa</p>
+          <h2 id="demo-title">Una lectura cambia<br>con lo que pasa <em>ahora.</em></h2>
+          <p>Ejemplo visual de la interfaz. No corresponde a un partido ni a una predicción publicada.</p>
+        </div>
+        <article class="match-reading reveal" aria-label="Ejemplo ilustrativo de lectura entre Arsenal y Chelsea">
+          <div class="match-topline"><span>Premier League · en juego</span><span class="live-pill"><i></i> Señales en vivo</span></div>
+          <div class="match-score">
+            <div class="team"><span class="club-mark arsenal" aria-hidden="true">A</span><strong>Arsenal</strong></div>
+            <div class="score"><b>1</b><span>—</span><b>0</b><small>63:18</small></div>
+            <div class="team team-away"><strong>Chelsea</strong><span class="club-mark chelsea" aria-hidden="true">C</span></div>
+          </div>
+          <div class="match-summary">
+            <p>La presión local y el marcador inclinan la lectura, pero el partido aún conserva escenarios abiertos.</p>
+            <dl><div><dt>7</dt><dd>remates locales</dd></div><div><dt>58%</dt><dd>posesión local</dd></div><div><dt>Degradada</dt><dd>calidad del dato</dd></div></dl>
+          </div>
+          <div class="probability-row" aria-label="Probabilidades ilustrativas"><div class="outcome home"><span>Arsenal</span><b>54%</b><i></i></div><div class="outcome draw"><span>Empate</span><b>27%</b><i></i></div><div class="outcome away"><span>Chelsea</span><b>19%</b><i></i></div></div>
+          <a class="demo-link" href="/app">Abrir lecturas disponibles <span aria-hidden="true">→</span></a>
+        </article>
+      </section>
+
+      <section class="method" id="como-funciona" aria-labelledby="method-title">
+        <div class="method-head reveal"><p class="kicker">Diseñado para mirar con criterio</p><h2 id="method-title">Datos visibles.<br><span>Decisiones rastreables.</span></h2></div>
+        <div class="method-grid">
+          <article class="reveal"><span>En vivo</span><h3>Lecturas con tiempo</h3><p>La página muestra cuándo se observó cada señal y si todavía está fresca para interpretarse.</p></article>
+          <article class="reveal"><span>Explicable</span><h3>Contexto antes que humo</h3><p>Cada pronóstico conserva sus probabilidades, calidad del dato y una explicación de los insumos usados.</p></article>
+          <article class="reveal"><span>Evaluable</span><h3>El modelo también responde</h3><p>Las nuevas versiones sólo se promueven con evaluación cronológica y comparadores explícitos.</p></article>
+        </div>
+      </section>
+
+      <section class="evidence" id="evidencia" aria-labelledby="evidence-title">
+        <div class="evidence-copy reveal"><p class="kicker">Transparencia de producto</p><h2 id="evidence-title">No escondemos<br>la <em>incertidumbre.</em></h2><p>Una página de modelo separa lo que el sistema sabe, lo que está recolectando y lo que aún no está demostrado. Esa distinción es parte de una buena lectura deportiva.</p><a class="button primary" href="/modelo">Revisar evidencia del modelo <span aria-hidden="true">→</span></a></div>
+        <aside class="evidence-panel reveal" aria-label="Resumen de transparencia del modelo"><div><span>Estado</span><strong>En observación</strong></div><div><span>Evaluación</span><strong>Temporal y reproducible</strong></div><div><span>Promoción</span><strong>Con doble métrica</strong></div><p>La evidencia se actualiza cuando hay datos confirmados suficientes.</p></aside>
+      </section>
+    </main>
+
+    <footer><a class="brand" href="#hero"><span class="brand-mark" aria-hidden="true">FL</span><span>Football <b>Live Agent</b></span></a><p>Lecturas en vivo para seguir el partido con más contexto.</p><a href="/app">Ir a la aplicación <span aria-hidden="true">↗</span></a></footer>
+    <script src="/assets/site.js" defer></script>
+  </body>
+</html>

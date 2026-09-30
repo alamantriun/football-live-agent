@@ -1,0 +1,13 @@
+.outcome.home i::after { width: 54%; }
+.outcome.draw i::after { width: 27%; }
+.outcome.away i::after { width: 19%; }
+
+/* Content remains readable while scripts are delayed or reduced motion is enabled. */
+.reveal { opacity: 1; transform: none; }
+
+@media (max-width: 48rem) {
+  .section-intro h2,
+  .method h2,
+  .demo h2,
+  .evidence h2 { font-size: 2.7rem; }
+}
