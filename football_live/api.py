@@ -6,18 +6,19 @@ import hmac
 import json
 import logging
 import re
-from typing import Any, AsyncIterator, Literal
+from typing import Annotated, Any, AsyncIterator, Literal
 from uuid import UUID, uuid4
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import AwareDatetime, Field
+from pydantic import AwareDatetime, Field, FiniteFloat
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from .domain import DataStatus, StrictDomainModel
+from .domain import DataStatus, MatchMinute, Probability, Score, StrictDomainModel
 from .errors import ApiError, error_body
 from .jobs import JobResult, run_collect, run_discover, run_settle, run_train
+from .live_analytics import build_live_analytics
 from .prediction_service import PredictionService
 from .provider import ProviderClient, ProviderUnavailable
 from .repository import RepositoryUnavailable
@@ -29,6 +30,12 @@ from .training import TrainingService
 logger = logging.getLogger(__name__)
 _IDEMPOTENCY_KEY = re.compile(r"^[a-z]+:[A-Za-z0-9T:+._-]{1,80}$")
 _MAX_JOB_BODY_BYTES = 1024
+_PublicName = Annotated[str, Field(min_length=1, max_length=200)]
+_ModelVersion = Annotated[str, Field(min_length=1, max_length=128)]
+_StatValue = Annotated[FiniteFloat, Field(ge=0.0, le=1000.0)]
+_GoalRate = Annotated[FiniteFloat, Field(ge=0.0, le=100.0)]
+_CoverageCount = Annotated[int, Field(ge=0, le=14)]
+_ProjectedScore = Annotated[int, Field(ge=0, le=40)]
 
 
 class PublicMatch(StrictDomainModel):
@@ -67,6 +74,108 @@ class MatchEnvelope(StrictDomainModel):
     data_status: DataStatus
     model_version: str | None = None
     item: PublicMatch
+
+
+class HistoryStatPair(StrictDomainModel):
+    home: _StatValue | None
+    away: _StatValue | None
+
+
+class HistoryStats(StrictDomainModel):
+    possession: HistoryStatPair
+    shots: HistoryStatPair
+    shots_on_target: HistoryStatPair
+    corners: HistoryStatPair
+    yellow_cards: HistoryStatPair
+    red_cards: HistoryStatPair
+    expected_goals: HistoryStatPair
+
+
+class HistoryProbabilities(StrictDomainModel):
+    home: Probability
+    draw: Probability
+    away: Probability
+
+
+class HistoryGoalRates(StrictDomainModel):
+    home: _GoalRate
+    away: _GoalRate
+
+
+class HistoryPoint(StrictDomainModel):
+    minute: MatchMinute | None
+    score_home: Score
+    score_away: Score
+    provider_observed_at: AwareDatetime
+    collected_at: AwareDatetime | None
+    quality: DataStatus
+    stats: HistoryStats
+    probabilities: HistoryProbabilities | None
+    lambda_adjusted: HistoryGoalRates | None
+    prediction_created_at: AwareDatetime | None
+
+
+class TrendPoint(StrictDomainModel):
+    minute: MatchMinute | None
+    observed_at: AwareDatetime
+    home: Probability | None
+    away: Probability | None
+
+
+class NextGoalResponse(StrictDomainModel):
+    home: Probability
+    none: Probability
+    away: Probability
+
+
+class GoalMarketsResponse(StrictDomainModel):
+    over_2_5: Probability
+    under_2_5: Probability
+    btts_yes: Probability
+    btts_no: Probability
+
+
+class TotalGoalsResponse(StrictDomainModel):
+    label: Literal["0", "1", "2", "3", "4", "5", "6", "7+"]
+    probability: Probability
+
+
+class ScorelineResponse(StrictDomainModel):
+    home: _ProjectedScore
+    away: _ProjectedScore
+    probability: Probability
+
+
+class CoverageResponse(StrictDomainModel):
+    available: _CoverageCount
+    total: _CoverageCount
+    percent: Probability
+
+
+class LiveAnalyticsResponse(StrictDomainModel):
+    activity: Annotated[list[TrendPoint], Field(max_length=90)]
+    momentum: Annotated[list[TrendPoint], Field(max_length=90)]
+    next_goal: NextGoalResponse | None
+    markets: GoalMarketsResponse | None
+    total_goals: Annotated[list[TotalGoalsResponse], Field(max_length=8)]
+    scorelines: Annotated[list[ScorelineResponse], Field(max_length=5)]
+    coverage: CoverageResponse
+
+
+class MatchHistory(StrictDomainModel):
+    public_id: UUID
+    home_name: _PublicName
+    away_name: _PublicName
+    points: Annotated[list[HistoryPoint], Field(max_length=90)]
+    analytics: LiveAnalyticsResponse
+
+
+class MatchHistoryEnvelope(StrictDomainModel):
+    request_id: UUID
+    generated_at: AwareDatetime
+    data_status: DataStatus
+    model_version: _ModelVersion | None
+    item: MatchHistory
 
 
 class ModelStatus(StrictDomainModel):
@@ -262,6 +371,41 @@ def create_app(
             model_version=item.model_version,
             item=item,
         ), public_cache=True)
+
+    @app.get(
+        "/api/matches/{public_id}/history",
+        response_model=MatchHistoryEnvelope,
+    )
+    async def match_history(
+        public_id: UUID,
+        request: Request,
+        limit: int = 90,
+    ) -> JSONResponse:
+        if not 1 <= limit <= 90:
+            raise ApiError(422, "invalid_request", "El límite debe estar entre 1 y 90.")
+        row = repository.public_match_history(public_id, limit)
+        if row is None:
+            raise ApiError(404, "not_found", "El partido no está disponible.")
+
+        points = [HistoryPoint.model_validate(point) for point in row["points"]]
+        analytics = LiveAnalyticsResponse.model_validate(
+            build_live_analytics([point.model_dump() for point in points])
+        )
+        item = MatchHistory.model_validate({
+            "public_id": row["public_id"],
+            "home_name": row["home_name"],
+            "away_name": row["away_name"],
+            "points": points,
+            "analytics": analytics,
+        })
+        envelope = MatchHistoryEnvelope(
+            request_id=_request_id(request),
+            generated_at=_now(),
+            data_status=points[-1].quality if points else DataStatus.SUSPENDED,
+            model_version=row["model_version"],
+            item=item,
+        )
+        return _json(200, envelope, public_cache=True)
 
     @app.get("/api/model/status", response_model=ModelStatusEnvelope)
     async def model_status(request: Request) -> JSONResponse:
