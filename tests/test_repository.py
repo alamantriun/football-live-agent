@@ -269,53 +269,30 @@ def history_prediction_rows():
         {
             "snapshot_id": str(HISTORY_SNAPSHOT_IDS[2]),
             "probabilities": {
-                "home": 80.0,
-                "draw": 10.0,
-                "away": 10.0,
+                "home": 45.0,
+                "draw": 30.0,
+                "away": 25.0,
                 "provider_prediction_id": "raw-prediction",
             },
-            "lambda_adjusted": {"home": 2.0, "away": 0.2, "internal": 99},
-            "created_at": "2026-09-24T20:02:30Z",
-            "model": {
-                "version": "candidate-newest",
-                "state": "candidate",
-                "id": str(UUID(int=201)),
-                "parameters": {"secret": True},
-            },
-            "model_version_id": str(UUID(int=201)),
-        },
-        {
-            "snapshot_id": str(HISTORY_SNAPSHOT_IDS[2]),
-            "probabilities": {"home": 45.0, "draw": 30.0, "away": 25.0},
-            "lambda_adjusted": {"home": 1.3, "away": 0.8},
+            "lambda_adjusted": {"home": 1.3, "away": 0.8, "internal": 99},
             "created_at": "2026-09-24T20:02:20Z",
-            "model": {
-                "version": "active-v1",
-                "state": "active",
-                "id": str(MODEL_ID),
-                "parameters": {"secret": True},
-            },
+            "model_version": "active-v1",
+            "model_version_id": str(MODEL_ID),
+            "parameters": {"secret": True},
         },
         {
             "snapshot_id": str(HISTORY_SNAPSHOT_IDS[1]),
             "probabilities": {"home": 35.0, "draw": 35.0, "away": 30.0},
             "lambda_adjusted": {"home": 1.0, "away": 0.9},
             "created_at": "2026-09-24T20:01:40Z",
-            "model": {"version": "fallback-newest", "state": "rejected"},
-        },
-        {
-            "snapshot_id": str(HISTORY_SNAPSHOT_IDS[1]),
-            "probabilities": {"home": 34.0, "draw": 35.0, "away": 31.0},
-            "lambda_adjusted": {"home": 0.9, "away": 0.9},
-            "created_at": "2026-09-24T20:01:30Z",
-            "model": {"version": "fallback-older", "state": "candidate"},
+            "model_version": "fallback-newest",
         },
         {
             "snapshot_id": str(HISTORY_SNAPSHOT_IDS[0]),
             "probabilities": {"home": 33.0, "draw": 34.0, "away": 33.0},
             "lambda_adjusted": {"home": 0.8, "away": 0.7},
             "created_at": "2026-09-24T20:00:30Z",
-            "model": {"version": "active-v1", "state": "active"},
+            "model_version": "active-v1",
         },
     ]
 
@@ -781,7 +758,7 @@ def test_public_match_history_uses_private_allowlist_and_returns_chronological_p
     fake_client.responses[("private", "table", "live_snapshots")] = (
         history_snapshot_rows()
     )
-    fake_client.responses[("private", "table", "predictions")] = (
+    fake_client.responses[("private", "rpc", "match_history_predictions")] = (
         history_prediction_rows()
     )
 
@@ -878,16 +855,9 @@ def test_public_match_history_uses_private_allowlist_and_returns_chronological_p
     }
     assert prediction_query == {
         "schema": "private",
-        "kind": "table",
-        "name": "predictions",
-        "params": None,
-        "select": (
-            "snapshot_id,probabilities,lambda_adjusted,created_at,"
-            "model:model_versions!predictions_model_version_id_fkey(version,state)"
-        ),
-        "filters": [("eq", "fixture_id", str(FIXTURE_ID))],
-        "order": ("created_at", True),
-        "limit": 90,
+        "kind": "rpc",
+        "name": "match_history_predictions",
+        "params": {"p_fixture_id": str(FIXTURE_ID), "p_limit": 90},
     }
 
 
@@ -920,12 +890,49 @@ def test_public_match_history_rejects_malformed_stat_payloads(
     snapshot_row = history_snapshot_rows()[0]
     snapshot_row["normalized_stats"] = malformed_stats
     fake_client.responses[("private", "table", "live_snapshots")] = [snapshot_row]
-    fake_client.responses[("private", "table", "predictions")] = []
+    fake_client.responses[("private", "rpc", "match_history_predictions")] = []
 
     with pytest.raises(RepositoryUnavailable) as captured:
         gateway.public_match_history(public_id)
 
     assert str(captured.value) == "El repositorio no está disponible temporalmente."
+
+
+@pytest.mark.parametrize(
+    "malformed_leaf",
+    [
+        True,
+        "4",
+        [],
+        {"secret_marker": "nested-secret-value"},
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+    ],
+)
+def test_public_match_history_rejects_nonfinite_or_nonnumeric_stat_leaves(
+    gateway, fake_client, malformed_leaf
+):
+    public_id = UUID("337a09f3-a806-4e56-a068-d758f74a78cb")
+    fake_client.responses[("private", "table", "fixtures")] = [
+        {
+            "id": str(FIXTURE_ID),
+            "public_id": str(public_id),
+            "home_name": "Arsenal",
+            "away_name": "Chelsea",
+        }
+    ]
+    snapshot_row = history_snapshot_rows()[0]
+    snapshot_row["normalized_stats"]["shots"]["home"] = malformed_leaf
+    fake_client.responses[("private", "table", "live_snapshots")] = [snapshot_row]
+    fake_client.responses[("private", "rpc", "match_history_predictions")] = []
+
+    with pytest.raises(RepositoryUnavailable) as captured:
+        gateway.public_match_history(public_id)
+
+    assert str(captured.value) == "El repositorio no está disponible temporalmente."
+    assert "nested-secret-value" not in str(captured.value)
+    assert "nested-secret-value" not in repr(captured.value.__cause__)
 
 
 def test_public_model_status_uses_safe_public_projection(gateway, fake_client):

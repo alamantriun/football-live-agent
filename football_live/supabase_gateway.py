@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from datetime import datetime
+from math import isfinite
 from typing import Any
 from uuid import UUID
 
@@ -35,10 +36,6 @@ HISTORY_FIXTURE_SELECT = "id,public_id,home_name,away_name"
 HISTORY_SNAPSHOT_SELECT = (
     "id,minute,score_home,score_away,normalized_stats,"
     "provider_observed_at,collected_at,quality"
-)
-HISTORY_PREDICTION_SELECT = (
-    "snapshot_id,probabilities,lambda_adjusted,created_at,"
-    "model:model_versions!predictions_model_version_id_fkey(version,state)"
 )
 HISTORY_STAT_KEYS = (
     "possession",
@@ -570,31 +567,20 @@ class SupabaseGateway:
         )
         prediction_response = self._execute(
             lambda: self._client.schema("private")
-            .table("predictions")
-            .select(HISTORY_PREDICTION_SELECT)
-            .eq("fixture_id", fixture_id)
-            .order("created_at", desc=True)
-            .limit(bounded_limit)
+            .rpc(
+                "match_history_predictions",
+                {"p_fixture_id": fixture_id, "p_limit": bounded_limit},
+            )
             .execute()
         )
 
         try:
             predictions: dict[str, dict[str, Any]] = {}
-            active_snapshots: set[str] = set()
             for row in self._rows(prediction_response):
                 snapshot_id = str(UUID(str(row["snapshot_id"])))
-                model = row["model"]
-                if not isinstance(model, dict):
-                    raise TypeError("malformed prediction model relation")
-                version = model["version"]
-                state = model["state"]
+                version = row["model_version"]
                 if not isinstance(version, str) or not version:
                     raise TypeError("malformed model version")
-                is_active = state == "active"
-                if snapshot_id in predictions and not (
-                    is_active and snapshot_id not in active_snapshots
-                ):
-                    continue
                 predictions[snapshot_id] = {
                     "probabilities": self._history_mapping(
                         row["probabilities"], ("home", "draw", "away")
@@ -605,8 +591,6 @@ class SupabaseGateway:
                     "prediction_created_at": row["created_at"],
                     "model_version": version,
                 }
-                if is_active:
-                    active_snapshots.add(snapshot_id)
 
             newest_points: list[dict[str, Any]] = []
             model_version: str | None = None
@@ -660,8 +644,23 @@ class SupabaseGateway:
             pair = value.get(key, {})
             if not isinstance(pair, dict):
                 raise TypeError("malformed history stat pair")
-            stats[key] = cls._history_mapping(pair, ("home", "away"))
+            stats[key] = {
+                side: cls._history_stat_leaf(pair.get(side))
+                for side in ("home", "away")
+            }
         return stats
+
+    @staticmethod
+    def _history_stat_leaf(value: Any) -> int | float | None:
+        if value is None:
+            return None
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not isfinite(value)
+        ):
+            raise TypeError("malformed history stat leaf")
+        return value
 
     def public_model_status(self) -> dict:
         response = self._execute(
