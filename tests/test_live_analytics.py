@@ -54,6 +54,18 @@ def test_zero_activity_falls_back_to_possession_but_absent_data_stays_null():
     assert analytics["activity"][-1]["away"] is None
 
 
+def test_activity_stays_null_when_only_one_side_has_weighted_evidence():
+    points = [
+        point(0, None, 4, None, 1),
+        point(1, None, 5, None, 2),
+    ]
+
+    analytics = build_live_analytics(points)
+
+    assert analytics["activity"][-1]["home"] is None
+    assert analytics["activity"][-1]["away"] is None
+
+
 def test_poisson_outputs_are_bounded_normalized_and_sorted():
     analytics = build_live_analytics([point(0, 5, 4, 2, 1)])
 
@@ -66,11 +78,50 @@ def test_poisson_outputs_are_bounded_normalized_and_sorted():
     assert probabilities == sorted(probabilities, reverse=True)
 
 
+def test_scorelines_select_top_five_before_rounding_probabilities():
+    current = point(0, 5, 4, 2, 1)
+    current["lambda_adjusted"] = {"home": 0.02, "away": 0.83}
+
+    analytics = build_live_analytics([current])
+
+    assert [(row["home"], row["away"]) for row in analytics["scorelines"]] == [
+        (1, 0),
+        (1, 1),
+        (1, 2),
+        (1, 3),
+        (2, 0),
+    ]
+
+
 def test_invalid_or_absent_rates_hide_model_scenarios():
     invalid = point(0, 5, 4, 2, 1)
     invalid["lambda_adjusted"] = {"home": -1.0, "away": float("nan")}
 
     analytics = build_live_analytics([invalid])
+
+    assert analytics["next_goal"] is None
+    assert analytics["markets"] is None
+    assert analytics["total_goals"] == []
+    assert analytics["scorelines"] == []
+
+
+def test_stale_quality_hides_model_scenarios():
+    stale = point(0, 5, 4, 2, 1)
+    stale["quality"] = "stale"
+
+    analytics = build_live_analytics([stale])
+
+    assert analytics["next_goal"] is None
+    assert analytics["markets"] is None
+    assert analytics["total_goals"] == []
+    assert analytics["scorelines"] == []
+
+
+def test_suspended_quality_hides_model_scenarios():
+    suspended = point(0, 5, 4, 2, 1)
+    suspended["quality"] = "suspended"
+
+    analytics = build_live_analytics([suspended])
 
     assert analytics["next_goal"] is None
     assert analytics["markets"] is None

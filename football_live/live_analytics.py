@@ -51,6 +51,7 @@ def _activity_series(points: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
     for index, current in enumerate(points):
         oldest = points[max(0, index - 4)]
         scores = {"home": 0.0, "away": 0.0}
+        has_evidence = {"home": False, "away": False}
         for key, weight in ACTIVITY_WEIGHTS.items():
             current_pair = current.get("stats", {}).get(key, {})
             oldest_pair = oldest.get("stats", {}).get(key, {})
@@ -60,10 +61,14 @@ def _activity_series(points: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
                     _finite(oldest_pair.get(side)),
                 )
                 if delta is not None:
+                    has_evidence[side] = True
                     scores[side] += weight * delta
 
         total = scores["home"] + scores["away"]
-        if total > 0.0:
+        if not all(has_evidence.values()):
+            home = None
+            away = None
+        elif total > 0.0:
             home = round(scores["home"] / total * 100.0, 2)
             away = round(100.0 - home, 2)
         else:
@@ -245,15 +250,14 @@ def _scoreline_distribution(points: Sequence[dict[str, Any]]) -> list[dict[str, 
     home_rate, away_rate = rates
     score_home, score_away = _current_score(points[-1])
     rows = [
-        {
-            "home": score_home + home_goals,
-            "away": score_away + away_goals,
-            "probability": round(probability * 100.0, 2),
-        }
+        (probability, score_home + home_goals, score_away + away_goals)
         for home_goals, away_goals, probability in _remaining_goal_grid(home_rate, away_rate)
     ]
-    rows.sort(key=lambda row: (-row["probability"], row["home"], row["away"]))
-    return rows[:5]
+    rows.sort(key=lambda row: (-row[0], row[1], row[2]))
+    return [
+        {"home": home, "away": away, "probability": round(probability * 100.0, 2)}
+        for probability, home, away in rows[:5]
+    ]
 
 
 def build_live_analytics(points: Sequence[dict[str, Any]]) -> dict[str, Any]:
