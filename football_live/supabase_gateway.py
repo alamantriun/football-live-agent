@@ -654,11 +654,13 @@ class SupabaseGateway:
     def _history_stat_leaf(value: Any) -> int | float | None:
         if value is None:
             return None
-        if (
-            isinstance(value, bool)
-            or not isinstance(value, (int, float))
-            or not isfinite(value)
-        ):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise TypeError("malformed history stat leaf")
+        try:
+            finite = isfinite(value)
+        except OverflowError as exc:
+            raise TypeError("malformed history stat leaf") from exc
+        if not finite:
             raise TypeError("malformed history stat leaf")
         return value
 

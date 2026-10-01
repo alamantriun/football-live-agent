@@ -935,6 +935,42 @@ def test_public_match_history_rejects_nonfinite_or_nonnumeric_stat_leaves(
     assert "nested-secret-value" not in repr(captured.value.__cause__)
 
 
+def test_public_match_history_sanitizes_oversized_integer_stat_leaf(
+    gateway, fake_client
+):
+    public_id = UUID("337a09f3-a806-4e56-a068-d758f74a78cb")
+    secret_marker = "oversized-integer-secret-value"
+    fake_client.responses[("private", "table", "fixtures")] = [
+        {
+            "id": str(FIXTURE_ID),
+            "public_id": str(public_id),
+            "home_name": "Arsenal",
+            "away_name": "Chelsea",
+        }
+    ]
+    snapshot_row = history_snapshot_rows()[0]
+    snapshot_row["normalized_stats"]["shots"] = {
+        "home": 10**10000,
+        "away": 2,
+        "secret_marker": secret_marker,
+    }
+    fake_client.responses[("private", "table", "live_snapshots")] = [snapshot_row]
+    fake_client.responses[("private", "rpc", "match_history_predictions")] = []
+
+    with pytest.raises(RepositoryUnavailable) as captured:
+        gateway.public_match_history(public_id)
+
+    assert str(captured.value) == "El repositorio no está disponible temporalmente."
+    error_chain = []
+    error = captured.value
+    while error is not None:
+        error_chain.append(str(error))
+        error = error.__cause__
+    sanitized_errors = " ".join(error_chain)
+    assert secret_marker not in sanitized_errors
+    assert "10000000000000000000" not in sanitized_errors
+
+
 def test_public_model_status_uses_safe_public_projection(gateway, fake_client):
     row = {"version": "2026.09.24.1", "train_size": 70}
     fake_client.responses[("public", "table", "model_status")] = [row]
