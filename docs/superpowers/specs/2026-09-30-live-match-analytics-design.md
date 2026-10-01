@@ -55,6 +55,14 @@ MatchHistoryEnvelope
     home_name: string
     away_name: string
     points: HistoryPoint[]
+    analytics:
+      activity: TrendPoint[]
+      momentum: TrendPoint[]
+      next_goal: { home: number, none: number, away: number } | null
+      markets: { over_2_5: number, under_2_5: number, btts_yes: number, btts_no: number } | null
+      total_goals: { label: string, probability: number }[]
+      scorelines: { home: integer, away: integer, probability: number }[]
+      coverage: { available: integer, total: integer, percent: number }
 
 HistoryPoint
   minute: integer | null
@@ -74,6 +82,12 @@ HistoryPoint
   probabilities: { home: number, draw: number, away: number } | null
   lambda_adjusted: { home: number, away: number } | null
   prediction_created_at: aware datetime | null
+
+TrendPoint
+  minute: integer | null
+  observed_at: aware datetime
+  home: number | null
+  away: number | null
 ```
 
 Unknown matches return the existing sanitized `404` response. Repository failures return the existing sanitized `503` response. Limits outside `1..90` return `422` before any database query.
@@ -82,8 +96,8 @@ Unknown matches return the existing sanitized `404` response. Repository failure
 
 Derived analytics are computed in a dedicated pure Python module so their formulas are testable and do not depend on the frontend.
 
-- **Observed pressure:** a transparent 0–100 relative index using only available shots, shots on target, corners, and xG. Missing inputs are excluded from the denominator rather than converted to zero. The UI labels this an observed index, not a probability.
-- **Momentum:** change in observed pressure over the recent valid observations, smoothed over three points. It is hidden when fewer than three valid points exist.
+- **Observed activity:** a transparent 0–100 relative share over the latest five observations. For each side, the non-negative cumulative deltas are weighted as `shots + 2 * shots_on_target + 0.5 * corners + 3 * xG`. Missing inputs are excluded rather than converted to zero. If both activity scores are zero and both possession values exist, possession supplies the relative share; otherwise the point is `null`. The UI labels this an experimental observed-activity index, not a probability or the former dangerous-attacks pressure metric.
+- **Momentum:** change in observed-activity share versus the third previous valid point, mapped around a neutral value of 50 with `clamp(50 + delta / 2, 0, 100)`. It is hidden when fewer than four valid activity points exist.
 - **Next goal:** calculated from the latest non-negative adjusted home and away goal rates. The three outcomes are home, no further goal, and away over the remaining match horizon. It is labelled experimental.
 - **Over/Under and BTTS:** calculated from the latest adjusted rates and current score with the same Poisson assumptions used by the prediction engine. They are labelled model scenarios, not separate validated models.
 - **Total goals and score matrix:** bounded Poisson distributions. The API returns only totals 0–7 and the five most probable scores, combining the tail into `7+` where necessary.
@@ -98,7 +112,7 @@ The existing match list and selected-match header remain unchanged. Under the cu
 
 1. A full-width probability-history line chart.
 2. A wide, text-forward team-stat comparison with paired bars.
-3. A full-width pressure and momentum chart.
+3. A full-width observed-activity and momentum chart.
 4. A two-column scenario area for next goal and Over/Under plus BTTS.
 5. A two-column distribution area for total goals and probable scores.
 6. A compact evidence footer for coverage, freshness, observation time, and model version.
