@@ -32,6 +32,7 @@ debug_players.json
 betano_text.txt
 
 # Editores / IDEs
+.worktrees/
 .vscode/
 .idea/
 *.swp
