@@ -26,6 +26,7 @@ FENCING_REQUEST_ID = UUID("8d69f642-7623-4779-bebd-85d6fc167553")
 HTTP_REQUEST_ID = UUID("cec47ae5-66e1-445d-9073-78560b471e42")
 OBSERVED_AT = datetime(2026, 9, 24, 20, 3, 44, tzinfo=timezone.utc)
 MODEL_CREATED_AT = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+HISTORY_SNAPSHOT_IDS = (UUID(int=101), UUID(int=102), UUID(int=103))
 
 
 class FakeResponse:
@@ -217,6 +218,106 @@ def model_row():
         "created_at": MODEL_CREATED_AT.isoformat(),
         "activated_at": OBSERVED_AT.isoformat(),
     }
+
+
+def history_snapshot_rows():
+    return [
+        {
+            "id": str(HISTORY_SNAPSHOT_IDS[2]),
+            "minute": 62,
+            "score_home": 1,
+            "score_away": 0,
+            "normalized_stats": {
+                "possession": {"home": 54.0, "away": 46.0},
+                "shots": {"home": 8, "away": 5},
+                "shots_on_target": {"home": 4, "away": 2},
+                "provider_player_id": "provider-player-raw",
+            },
+            "provider_observed_at": "2026-09-24T20:02:00Z",
+            "collected_at": "2026-09-24T20:02:02Z",
+            "quality": "fresh",
+            "sanitized_provider_data": {"provider_fixture_id": "raw-42"},
+        },
+        {
+            "id": str(HISTORY_SNAPSHOT_IDS[1]),
+            "minute": 61,
+            "score_home": 0,
+            "score_away": 0,
+            "normalized_stats": {
+                "shots": {"home": 7},
+                "expected_goals": {"away": 0.3},
+            },
+            "provider_observed_at": "2026-09-24T20:01:00Z",
+            "collected_at": None,
+            "quality": "degraded",
+        },
+        {
+            "id": str(HISTORY_SNAPSHOT_IDS[0]),
+            "minute": 60,
+            "score_home": 0,
+            "score_away": 0,
+            "normalized_stats": {},
+            "provider_observed_at": "2026-09-24T20:00:00Z",
+            "collected_at": "2026-09-24T20:00:02Z",
+            "quality": "fresh",
+        },
+    ]
+
+
+def history_prediction_rows():
+    return [
+        {
+            "snapshot_id": str(HISTORY_SNAPSHOT_IDS[2]),
+            "probabilities": {
+                "home": 80.0,
+                "draw": 10.0,
+                "away": 10.0,
+                "provider_prediction_id": "raw-prediction",
+            },
+            "lambda_adjusted": {"home": 2.0, "away": 0.2, "internal": 99},
+            "created_at": "2026-09-24T20:02:30Z",
+            "model": {
+                "version": "candidate-newest",
+                "state": "candidate",
+                "id": str(UUID(int=201)),
+                "parameters": {"secret": True},
+            },
+            "model_version_id": str(UUID(int=201)),
+        },
+        {
+            "snapshot_id": str(HISTORY_SNAPSHOT_IDS[2]),
+            "probabilities": {"home": 45.0, "draw": 30.0, "away": 25.0},
+            "lambda_adjusted": {"home": 1.3, "away": 0.8},
+            "created_at": "2026-09-24T20:02:20Z",
+            "model": {
+                "version": "active-v1",
+                "state": "active",
+                "id": str(MODEL_ID),
+                "parameters": {"secret": True},
+            },
+        },
+        {
+            "snapshot_id": str(HISTORY_SNAPSHOT_IDS[1]),
+            "probabilities": {"home": 35.0, "draw": 35.0, "away": 30.0},
+            "lambda_adjusted": {"home": 1.0, "away": 0.9},
+            "created_at": "2026-09-24T20:01:40Z",
+            "model": {"version": "fallback-newest", "state": "rejected"},
+        },
+        {
+            "snapshot_id": str(HISTORY_SNAPSHOT_IDS[1]),
+            "probabilities": {"home": 34.0, "draw": 35.0, "away": 31.0},
+            "lambda_adjusted": {"home": 0.9, "away": 0.9},
+            "created_at": "2026-09-24T20:01:30Z",
+            "model": {"version": "fallback-older", "state": "candidate"},
+        },
+        {
+            "snapshot_id": str(HISTORY_SNAPSHOT_IDS[0]),
+            "probabilities": {"home": 33.0, "draw": 34.0, "away": 33.0},
+            "lambda_adjusted": {"home": 0.8, "away": 0.7},
+            "created_at": "2026-09-24T20:00:30Z",
+            "model": {"version": "active-v1", "state": "active"},
+        },
+    ]
 
 
 def test_snapshot_bucket_is_stable_per_fixture_and_minute():
@@ -662,6 +763,169 @@ def test_public_match_uses_safe_public_projection(gateway, fake_client):
     assert operation["limit"] == 1
     assert operation["select"] != "*"
     assert "provider_fixture_id" not in operation["select"]
+
+
+def test_public_match_history_uses_private_allowlist_and_returns_chronological_points(
+    gateway, fake_client
+):
+    public_id = UUID("337a09f3-a806-4e56-a068-d758f74a78cb")
+    fake_client.responses[("private", "table", "fixtures")] = [
+        {
+            "id": str(FIXTURE_ID),
+            "public_id": str(public_id),
+            "home_name": "Arsenal",
+            "away_name": "Chelsea",
+            "provider_fixture_id": "provider-fixture-raw",
+        }
+    ]
+    fake_client.responses[("private", "table", "live_snapshots")] = (
+        history_snapshot_rows()
+    )
+    fake_client.responses[("private", "table", "predictions")] = (
+        history_prediction_rows()
+    )
+
+    result = gateway.public_match_history(public_id, limit=500)
+
+    assert result is not None
+    assert set(result) == {
+        "public_id",
+        "home_name",
+        "away_name",
+        "model_version",
+        "points",
+    }
+    assert [point["minute"] for point in result["points"]] == [60, 61, 62]
+    assert result["model_version"] == "active-v1"
+    assert result["points"][-1]["probabilities"] == {
+        "home": 45.0,
+        "draw": 30.0,
+        "away": 25.0,
+    }
+    assert result["points"][1]["probabilities"] == {
+        "home": 35.0,
+        "draw": 35.0,
+        "away": 30.0,
+    }
+    assert result["points"][-1]["stats"]["shots_on_target"] == {
+        "home": 4,
+        "away": 2,
+    }
+    assert result["points"][1]["stats"]["shots"] == {
+        "home": 7,
+        "away": None,
+    }
+    assert result["points"][0]["stats"] == {
+        key: {"home": None, "away": None}
+        for key in (
+            "possession",
+            "shots",
+            "shots_on_target",
+            "corners",
+            "yellow_cards",
+            "red_cards",
+            "expected_goals",
+        )
+    }
+    assert set(result["points"][-1]) == {
+        "minute",
+        "score_home",
+        "score_away",
+        "stats",
+        "provider_observed_at",
+        "collected_at",
+        "quality",
+        "probabilities",
+        "lambda_adjusted",
+        "prediction_created_at",
+    }
+    serialized = str(result)
+    for forbidden in (
+        str(FIXTURE_ID),
+        *(str(item) for item in HISTORY_SNAPSHOT_IDS),
+        str(MODEL_ID),
+        "provider-fixture-raw",
+        "provider-player-raw",
+        "raw-prediction",
+        "sanitized_provider_data",
+        "parameters",
+        "secret",
+    ):
+        assert forbidden not in serialized
+
+    fixture_query, snapshot_query, prediction_query = fake_client.operations[-3:]
+    assert fixture_query == {
+        "schema": "private",
+        "kind": "table",
+        "name": "fixtures",
+        "params": None,
+        "select": "id,public_id,home_name,away_name",
+        "filters": [("eq", "public_id", str(result["public_id"]))],
+        "limit": 1,
+    }
+    assert snapshot_query == {
+        "schema": "private",
+        "kind": "table",
+        "name": "live_snapshots",
+        "params": None,
+        "select": (
+            "id,minute,score_home,score_away,normalized_stats,"
+            "provider_observed_at,collected_at,quality"
+        ),
+        "filters": [("eq", "fixture_id", str(FIXTURE_ID))],
+        "order": ("provider_observed_at", True),
+        "limit": 90,
+    }
+    assert prediction_query == {
+        "schema": "private",
+        "kind": "table",
+        "name": "predictions",
+        "params": None,
+        "select": (
+            "snapshot_id,probabilities,lambda_adjusted,created_at,"
+            "model:model_versions!predictions_model_version_id_fkey(version,state)"
+        ),
+        "filters": [("eq", "fixture_id", str(FIXTURE_ID))],
+        "order": ("created_at", True),
+        "limit": 90,
+    }
+
+
+def test_public_match_history_returns_none_without_private_history_queries(
+    gateway, fake_client
+):
+    public_id = UUID("337a09f3-a806-4e56-a068-d758f74a78cb")
+
+    assert gateway.public_match_history(public_id) is None
+    assert len(fake_client.operations) == 1
+    assert fake_client.operations[0]["name"] == "fixtures"
+
+
+@pytest.mark.parametrize(
+    "malformed_stats",
+    [[], {"shots": 4}],
+)
+def test_public_match_history_rejects_malformed_stat_payloads(
+    gateway, fake_client, malformed_stats
+):
+    public_id = UUID("337a09f3-a806-4e56-a068-d758f74a78cb")
+    fake_client.responses[("private", "table", "fixtures")] = [
+        {
+            "id": str(FIXTURE_ID),
+            "public_id": str(public_id),
+            "home_name": "Arsenal",
+            "away_name": "Chelsea",
+        }
+    ]
+    snapshot_row = history_snapshot_rows()[0]
+    snapshot_row["normalized_stats"] = malformed_stats
+    fake_client.responses[("private", "table", "live_snapshots")] = [snapshot_row]
+    fake_client.responses[("private", "table", "predictions")] = []
+
+    with pytest.raises(RepositoryUnavailable) as captured:
+        gateway.public_match_history(public_id)
+
+    assert str(captured.value) == "El repositorio no está disponible temporalmente."
 
 
 def test_public_model_status_uses_safe_public_projection(gateway, fake_client):

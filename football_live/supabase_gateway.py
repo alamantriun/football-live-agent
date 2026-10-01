@@ -31,6 +31,24 @@ PUBLIC_MODEL_SELECT = (
     "version,train_size,validation_size,brier,log_loss,activated_at,"
     "last_training_finished_at,last_training_decision,updated_at"
 )
+HISTORY_FIXTURE_SELECT = "id,public_id,home_name,away_name"
+HISTORY_SNAPSHOT_SELECT = (
+    "id,minute,score_home,score_away,normalized_stats,"
+    "provider_observed_at,collected_at,quality"
+)
+HISTORY_PREDICTION_SELECT = (
+    "snapshot_id,probabilities,lambda_adjusted,created_at,"
+    "model:model_versions!predictions_model_version_id_fkey(version,state)"
+)
+HISTORY_STAT_KEYS = (
+    "possession",
+    "shots",
+    "shots_on_target",
+    "corners",
+    "yellow_cards",
+    "red_cards",
+    "expected_goals",
+)
 TRAINING_EXAMPLE_SELECT = (
     "fixture_id,first_observed_at,outcome_confirmed_at,final_home,"
     "final_away,observations"
@@ -513,6 +531,137 @@ class SupabaseGateway:
         )
         rows = self._rows(response)
         return rows[0] if rows else None
+
+    def public_match_history(
+        self, public_id: UUID, limit: int = 90
+    ) -> dict | None:
+        fixture_response = self._execute(
+            lambda: self._client.schema("private")
+            .table("fixtures")
+            .select(HISTORY_FIXTURE_SELECT)
+            .eq("public_id", str(public_id))
+            .limit(1)
+            .execute()
+        )
+        fixtures = self._rows(fixture_response)
+        if not fixtures:
+            return None
+
+        try:
+            fixture = fixtures[0]
+            fixture_id = str(UUID(str(fixture["id"])))
+            result = {
+                "public_id": fixture["public_id"],
+                "home_name": fixture["home_name"],
+                "away_name": fixture["away_name"],
+            }
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RepositoryUnavailable(PUBLIC_ERROR) from exc
+
+        bounded_limit = self._cap(limit, 90)
+        snapshot_response = self._execute(
+            lambda: self._client.schema("private")
+            .table("live_snapshots")
+            .select(HISTORY_SNAPSHOT_SELECT)
+            .eq("fixture_id", fixture_id)
+            .order("provider_observed_at", desc=True)
+            .limit(bounded_limit)
+            .execute()
+        )
+        prediction_response = self._execute(
+            lambda: self._client.schema("private")
+            .table("predictions")
+            .select(HISTORY_PREDICTION_SELECT)
+            .eq("fixture_id", fixture_id)
+            .order("created_at", desc=True)
+            .limit(bounded_limit)
+            .execute()
+        )
+
+        try:
+            predictions: dict[str, dict[str, Any]] = {}
+            active_snapshots: set[str] = set()
+            for row in self._rows(prediction_response):
+                snapshot_id = str(UUID(str(row["snapshot_id"])))
+                model = row["model"]
+                if not isinstance(model, dict):
+                    raise TypeError("malformed prediction model relation")
+                version = model["version"]
+                state = model["state"]
+                if not isinstance(version, str) or not version:
+                    raise TypeError("malformed model version")
+                is_active = state == "active"
+                if snapshot_id in predictions and not (
+                    is_active and snapshot_id not in active_snapshots
+                ):
+                    continue
+                predictions[snapshot_id] = {
+                    "probabilities": self._history_mapping(
+                        row["probabilities"], ("home", "draw", "away")
+                    ),
+                    "lambda_adjusted": self._history_mapping(
+                        row["lambda_adjusted"], ("home", "away")
+                    ),
+                    "prediction_created_at": row["created_at"],
+                    "model_version": version,
+                }
+                if is_active:
+                    active_snapshots.add(snapshot_id)
+
+            newest_points: list[dict[str, Any]] = []
+            model_version: str | None = None
+            for snapshot in self._rows(snapshot_response):
+                snapshot_id = str(UUID(str(snapshot["id"])))
+                prediction = predictions.get(snapshot_id)
+                if model_version is None and prediction is not None:
+                    model_version = prediction["model_version"]
+                newest_points.append(
+                    {
+                        "minute": snapshot["minute"],
+                        "score_home": snapshot["score_home"],
+                        "score_away": snapshot["score_away"],
+                        "stats": self._history_stats(snapshot["normalized_stats"]),
+                        "provider_observed_at": snapshot["provider_observed_at"],
+                        "collected_at": snapshot["collected_at"],
+                        "quality": snapshot["quality"],
+                        "probabilities": (
+                            prediction["probabilities"] if prediction else None
+                        ),
+                        "lambda_adjusted": (
+                            prediction["lambda_adjusted"] if prediction else None
+                        ),
+                        "prediction_created_at": (
+                            prediction["prediction_created_at"]
+                            if prediction
+                            else None
+                        ),
+                    }
+                )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RepositoryUnavailable(PUBLIC_ERROR) from exc
+
+        return result | {
+            "model_version": model_version,
+            "points": list(reversed(newest_points)),
+        }
+
+    @staticmethod
+    def _history_mapping(value: Any, keys: tuple[str, ...]) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise TypeError("malformed history mapping")
+        return {key: value.get(key) for key in keys}
+
+    @classmethod
+    def _history_stats(cls, value: Any) -> dict[str, dict[str, Any]]:
+        if not isinstance(value, dict):
+            raise TypeError("malformed history stats")
+        stats: dict[str, dict[str, Any]] = {}
+        for key in HISTORY_STAT_KEYS:
+            pair = value.get(key, {})
+            if not isinstance(pair, dict):
+                raise TypeError("malformed history stat pair")
+            stats[key] = cls._history_mapping(pair, ("home", "away"))
+        return stats
 
     def public_model_status(self) -> dict:
         response = self._execute(
