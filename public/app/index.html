@@ -18,8 +18,63 @@
         <aside class="match-panel"><div class="panel-title"><h2>En seguimiento</h2><button id="refresh" type="button">Actualizar</button></div><div id="match-list" class="match-list" aria-live="polite"></div></aside>
         <section id="match-detail" class="match-detail" aria-live="polite" aria-busy="true"><div class="empty-reading"><span>↗</span><h2>Elige un partido</h2><p>Las lecturas publicadas aparecerán aquí con su contexto y sus límites.</p></div></section>
       </section>
+      <section class="analytics" aria-labelledby="analytics-heading" hidden>
+        <h2 id="analytics-heading">Análisis en vivo</h2>
+        <p id="analytics-status" role="status" aria-live="polite" hidden>Selecciona un partido para consultar su historial.</p>
+        <button id="analytics-retry" class="analytics-retry" type="button" hidden>Reintentar análisis</button>
+        <div class="analytics-flow">
+          <section aria-labelledby="probability-heading" hidden>
+            <h3 id="probability-heading">Historial de probabilidades</h3>
+            <p id="probability-summary" class="muted">Dato no disponible. Una observación no basta para formar una tendencia.</p>
+            <canvas id="probability-history" role="img" aria-label="Historial de probabilidades del local, empate y visitante" aria-describedby="probability-summary" hidden>Dato no disponible. Consulta el resumen del historial de probabilidades.</canvas>
+          </section>
+          <section aria-labelledby="stats-heading" hidden>
+            <h3 id="stats-heading">Estadísticas de los equipos</h3>
+            <p class="muted">Local y visitante · los datos ausentes se muestran como —.</p>
+            <dl id="team-stats" class="stat-comparison" hidden>
+              <div><dt>Posesión</dt><dd>— <span class="muted">Dato no disponible</span></dd></div>
+              <div><dt>Tiros</dt><dd>— <span class="muted">Dato no disponible</span></dd></div>
+              <div><dt>Tiros a puerta</dt><dd>— <span class="muted">Dato no disponible</span></dd></div>
+              <div><dt>Córners</dt><dd>— <span class="muted">Dato no disponible</span></dd></div>
+              <div><dt>Tarjetas amarillas</dt><dd>— <span class="muted">Dato no disponible</span></dd></div>
+              <div><dt>Tarjetas rojas</dt><dd>— <span class="muted">Dato no disponible</span></dd></div>
+              <div><dt>Goles esperados del proveedor</dt><dd>— <span class="muted">Dato no disponible</span></dd></div>
+            </dl>
+          </section>
+          <section aria-labelledby="activity-heading" hidden>
+            <h3 id="activity-heading">Actividad observada y momentum</h3>
+            <p id="activity-summary" class="muted">Índice experimental. Dato no disponible; no representa una probabilidad validada.</p>
+            <canvas id="activity-chart" role="img" aria-label="Series de actividad observada y momentum de ambos equipos" aria-describedby="activity-summary" hidden>Dato no disponible. Consulta el resumen de actividad observada.</canvas>
+          </section>
+          <section id="scenario-markets" class="analysis-split" aria-label="Escenarios del modelo" hidden>
+            <section aria-labelledby="next-goal-heading">
+              <h3 id="next-goal-heading">Próximo gol</h3>
+              <p class="muted">Escenario experimental del modelo.</p>
+              <dl id="next-goal" class="analysis-rows"><dt>Lectura</dt><dd>Dato no disponible</dd></dl>
+            </section>
+            <section aria-labelledby="markets-heading">
+              <h3 id="markets-heading">Goles y ambos equipos marcan</h3>
+              <p class="muted">Escenarios del modelo · más/menos de 2,5 goles.</p>
+              <dl id="market-probabilities" class="analysis-rows"><dt>Lectura</dt><dd>Dato no disponible</dd></dl>
+            </section>
+          </section>
+          <div class="analysis-split" hidden>
+            <section aria-labelledby="goals-heading">
+              <h3 id="goals-heading">Distribución de goles totales</h3>
+              <dl id="goals-distribution" class="analysis-rows" hidden><dt>Lectura</dt><dd>Dato no disponible</dd></dl>
+            </section>
+            <section aria-labelledby="scorelines-heading">
+              <h3 id="scorelines-heading">Marcadores más probables</h3>
+              <ol id="scorelines" class="analysis-rows" hidden><li>Dato no disponible</li></ol>
+            </section>
+          </div>
+          <footer id="analytics-evidence" class="analytics-evidence" aria-label="Evidencia y calidad de la lectura" hidden>
+            <p>Cobertura, calidad, modelo y hora de observación: dato no disponible.</p>
+          </footer>
+        </div>
+      </section>
       <p class="disclaimer">Las probabilidades expresan incertidumbre y no son una garantía ni una recomendación de apuesta.</p>
     </main>
-    <script src="/app/app.js" defer></script>
+    <script type="module" src="/app/app.js"></script>
   </body>
 </html>
