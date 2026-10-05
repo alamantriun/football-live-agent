@@ -37,3 +37,7 @@
 .score-matrix-cell:hover{box-shadow:inset 0 0 0 2px var(--yellow);color:var(--yellow)}
 @media(max-width:48rem){.analysis-split{grid-template-columns:minmax(0,1fr)}.stat-comparison>div{grid-template-columns:minmax(0,1fr)}.analytics canvas{height:14rem}.analytics-flow{gap:2rem}.score-matrix{margin-left:calc(-1 * clamp(0rem,2vw,.5rem));margin-right:calc(-1 * clamp(0rem,2vw,.5rem))}}
 .match-button .match-time{color:var(--yellow);font-size:.78rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase}
+.workspace{display:block}
+.match-list{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media(max-width:64rem){.match-list{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:48rem){.match-list{grid-template-columns:1fr}}

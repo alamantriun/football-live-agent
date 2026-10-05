@@ -30,6 +30,17 @@ def test_dashboard_history_contract_and_responsive_styles():
         assert selector in css
 
 
+def test_follow_list_is_a_responsive_match_matrix_above_live_analysis():
+    css = (APP / "app.css").read_text(encoding="utf-8")
+    html = (APP / "index.html").read_text(encoding="utf-8")
+
+    assert ".workspace{display:block}" in css
+    assert ".match-list{grid-template-columns:repeat(3,minmax(0,1fr))}" in css
+    assert ".match-list{grid-template-columns:repeat(2,minmax(0,1fr))}" in css
+    assert ".match-list{grid-template-columns:1fr}" in css
+    assert html.index('class="workspace"') < html.index('class="analytics"')
+
+
 def test_dashboard_has_a_safe_same_origin_live_data_contract():
     html = (APP / "index.html").read_text(encoding="utf-8")
     javascript = (APP / "app.js").read_text(encoding="utf-8")
