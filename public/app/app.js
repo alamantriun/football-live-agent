@@ -12,6 +12,10 @@ const featuredClubLogos = new Map([
   ["arsenal fc", "https://imagecache.365scores.com/image/upload/f_png,w_160,h_160,c_limit,q_auto:eco,dpr_2,d_Competitors:default1.png/v20/Competitors/104"],
   ["chelsea", "https://imagecache.365scores.com/image/upload/f_png,w_160,h_160,c_limit,q_auto:eco,dpr_2,d_Competitors:default1.png/v7/Competitors/106"],
   ["chelsea fc", "https://imagecache.365scores.com/image/upload/f_png,w_160,h_160,c_limit,q_auto:eco,dpr_2,d_Competitors:default1.png/v7/Competitors/106"],
+  ["panamá", "https://imagecache.365scores.com/image/upload/f_png,w_160,h_160,c_limit,q_auto:eco,dpr_2,d_Competitors:default1.png/Competitors/5414"],
+  ["panama", "https://imagecache.365scores.com/image/upload/f_png,w_160,h_160,c_limit,q_auto:eco,dpr_2,d_Competitors:default1.png/Competitors/5414"],
+  ["nueva zelanda", "https://imagecache.365scores.com/image/upload/f_png,w_160,h_160,c_limit,q_auto:eco,dpr_2,d_Competitors:default1.png/Competitors/2391"],
+  ["new zealand", "https://imagecache.365scores.com/image/upload/f_png,w_160,h_160,c_limit,q_auto:eco,dpr_2,d_Competitors:default1.png/Competitors/2391"],
 ]);
 const publicIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 let liveItems = [];

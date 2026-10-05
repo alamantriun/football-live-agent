@@ -59,6 +59,8 @@ def test_dashboard_declares_all_live_data_states_and_safe_logo_fallback():
     assert "localStorage" in javascript
     assert "featuredClubLogos" in javascript
     assert "imagecache.365scores.com" in javascript
+    assert "/Competitors/5414" in javascript
+    assert "/Competitors/2391" in javascript
     assert "freebiesupply" not in javascript.lower()
     match_list = javascript.split("function renderMatchList", 1)[1].split("function probabilityCard", 1)[0]
     assert "clubMark(item.home_name, item.home_logo_url)" in match_list
