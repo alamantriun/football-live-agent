@@ -229,6 +229,24 @@ test("match list shows live minute and translated match state beside each score"
   assert.match(h.nodes.get("#match-list").children[3].className, /match-scheduled/);
 });
 
+test("live analysis countdown resets after a polling refresh", async () => {
+  const h = await harness();
+  assert.match(h.nodes.get("#refresh-countdown")?.textContent || "", /20/);
+  h.intervals[1]();
+  assert.match(h.nodes.get("#refresh-countdown").textContent, /19/);
+  h.intervals[0]();
+  assert.match(h.nodes.get("#refresh-countdown").textContent, /20/);
+});
+
+test("both teams to score uses an accessible visual instead of generic market rows", async () => {
+  const h = await harness(); await selected(h);
+  const visual = h.nodes.get("#btts-visual");
+  assert.equal(visual?.hidden, false);
+  assert.match(visual?.textContent || "", /Sí 10\.00%.*No 90\.00%/);
+  assert.match(visual?.attributes["aria-label"] || "", /sí 10\.00%.*no 90\.00%/i);
+  assert.doesNotMatch(h.nodes.get("#market-probabilities").textContent, /Ambos marcan/);
+});
+
 test("selected live match exposes broadcast badges and motion hooks", async () => {
   const h = await harness(); const payload = history();
   await selected(h, payload, { ...summary(A), status: "live", minute: 63 });
@@ -331,6 +349,7 @@ test("failed poll summary invalidates current evidence and hides simulations but
     assert.equal(h.nodes.get("#scenario-markets").hidden, true, "failed current summary cannot keep fresh simulations");
     assert.equal(h.nodes.get("#goals-distribution").hidden, true);
     assert.equal(h.nodes.get("#scorelines").hidden, true);
+    assert.equal(h.nodes.get("#btts-visual").hidden, true);
     assert.doesNotMatch(h.nodes.get("#analytics-evidence").textContent, /Estado actual: fresh/);
     assert.match(h.nodes.get("#analytics-evidence").textContent, /Calidad histórica: fresh/);
     assert.equal(h.nodes.get("#team-stats").hidden, false);

@@ -31,6 +31,9 @@ let statsSnapshot = null;
 let matrixSnapshot = null;
 let resizeTimer = null;
 let refreshTimer = null;
+const refreshIntervalSeconds = 20;
+let countdownSeconds = refreshIntervalSeconds;
+let countdownTimer = null;
 const analyticsArea = document.querySelector(".analytics");
 const analyticsStatus = document.querySelector("#analytics-status");
 const analyticsRetry = document.querySelector("#analytics-retry");
@@ -44,6 +47,15 @@ const goalsDistribution = document.querySelector("#goals-distribution");
 const scorelines = document.querySelector("#scorelines");
 const scoreMatrix = document.querySelector("#score-matrix");
 const evidence = document.querySelector("#analytics-evidence");
+const refreshCountdown = document.querySelector("#refresh-countdown");
+const refreshCountdownRing = document.querySelector("#refresh-countdown-ring");
+const refreshCountdownValue = document.querySelector("#refresh-countdown-value");
+const refreshCountdownLabel = document.querySelector("#refresh-countdown-label");
+const bttsVisual = document.querySelector("#btts-visual");
+const bttsRing = document.querySelector("#btts-ring");
+const bttsRingValue = document.querySelector("#btts-ring-value");
+const bttsYes = document.querySelector("#btts-yes");
+const bttsNo = document.querySelector("#btts-no");
 
 function setStatus(message, state) {
   status.textContent = message;
@@ -310,6 +322,12 @@ function resetAnalytics() {
   }
   teamStats.replaceChildren(); teamStats.hidden = true; teamStats.parentElement.hidden = true;
   scenarioMarkets.hidden = true;
+  bttsVisual.hidden = true;
+  bttsVisual.setAttribute("aria-label", "Ambos equipos marcan: dato no disponible.");
+  bttsRing.style.setProperty("--yes", "0");
+  bttsRingValue.textContent = "—";
+  bttsYes.textContent = "Sí —";
+  bttsNo.textContent = "No —";
   for (const node of [nextGoal, marketProbabilities, goalsDistribution, scorelines, scoreMatrix]) node.replaceChildren();
   goalsDistribution.hidden = true; scorelines.hidden = true;
   goalsDistribution.parentElement.parentElement.hidden = true;
@@ -382,6 +400,27 @@ function percentageRow(target, label, value, ordered = false) {
   }
 }
 
+function probabilityLabel(value) {
+  return `${Number(value).toFixed(2)}%`;
+}
+
+function renderBtts(yes, no, available) {
+  bttsVisual.hidden = !available;
+  if (!available) {
+    bttsVisual.setAttribute("aria-label", "Ambos equipos marcan: dato no disponible.");
+    return;
+  }
+  const yesValue = Math.max(0, Math.min(100, Number(yes)));
+  const noValue = Math.max(0, Math.min(100, Number(no)));
+  const yesLabel = probabilityLabel(yesValue);
+  const noLabel = probabilityLabel(noValue);
+  bttsRing.style.setProperty("--yes", String(yesValue));
+  bttsRingValue.textContent = yesLabel;
+  bttsYes.textContent = `Sí ${yesLabel}`;
+  bttsNo.textContent = `No ${noLabel}`;
+  bttsVisual.setAttribute("aria-label", `Ambos equipos marcan: sí ${yesLabel}, no ${noLabel}.`);
+}
+
 function renderScoreMatrix(rows, matchId) {
   scoreMatrix.replaceChildren();
   scoreMatrix.hidden = !rows.length;
@@ -422,11 +461,13 @@ function renderScenarios(analytics, dataStatus, modelVersion, matchId) {
   for (const node of [nextGoal, marketProbabilities, goalsDistribution, scorelines, scoreMatrix]) node.replaceChildren();
   const nextAvailable = allowed && analytics.next_goal != null;
   const marketsAvailable = allowed && analytics.markets != null;
+  const bttsAvailable = marketsAvailable && Number.isFinite(analytics.markets?.btts_yes) && Number.isFinite(analytics.markets?.btts_no);
   scenarioMarkets.hidden = !nextAvailable && !marketsAvailable;
   nextGoal.parentElement.hidden = !nextAvailable; marketProbabilities.parentElement.hidden = !marketsAvailable;
   scenarioMarkets.setAttribute("aria-label", `Escenarios experimentales del modelo ${modelVersion ?? "Dato no disponible"} · Datos ${dataStatus ?? "Dato no disponible"}`);
   if (nextAvailable) for (const [key, label] of [["home", "Local"], ["none", "Sin más goles"], ["away", "Visitante"]]) percentageRow(nextGoal, label, analytics.next_goal[key]);
-  if (marketsAvailable) for (const [key, label] of [["over_2_5", "Más de 2,5 goles"], ["under_2_5", "Menos de 2,5 goles"], ["btts_yes", "Ambos marcan: sí"], ["btts_no", "Ambos marcan: no"]]) percentageRow(marketProbabilities, label, analytics.markets[key]);
+  renderBtts(analytics.markets?.btts_yes, analytics.markets?.btts_no, bttsAvailable);
+  if (marketsAvailable) for (const [key, label] of [["over_2_5", "Más de 2,5 goles"], ["under_2_5", "Menos de 2,5 goles"]]) percentageRow(marketProbabilities, label, analytics.markets[key]);
   const totals = allowed && Array.isArray(analytics.total_goals) ? analytics.total_goals : [];
   const scores = allowed && Array.isArray(analytics.scorelines) ? analytics.scorelines : [];
   const matrix = allowed && Array.isArray(analytics.score_matrix) ? analytics.score_matrix : [];
@@ -488,6 +529,7 @@ function renderAnalytics(item, dataStatus, modelVersion) {
 function refreshData() {
   const id = selectedId;
   const version = selectionVersion;
+  resetRefreshCountdown();
   loadLive();
   // Capture selection now, never after an asynchronous list response. Polls do not
   // supersede requests already serving a newer selection or a manual retry.
@@ -496,6 +538,23 @@ function refreshData() {
   }
 }
 function schedulePolling() { window.clearInterval(refreshTimer); refreshTimer = window.setInterval(() => { if (!document.hidden) refreshData(); }, 20000); }
+function renderRefreshCountdown() {
+  const progress = Math.max(0, Math.min(1, countdownSeconds / refreshIntervalSeconds));
+  refreshCountdownRing.style.setProperty("--progress", `${progress * 360}deg`);
+  refreshCountdownValue.textContent = String(countdownSeconds);
+  refreshCountdownLabel.textContent = `en ${countdownSeconds} s`;
+  refreshCountdown.setAttribute("aria-label", `Próxima actualización de predicciones en ${countdownSeconds} segundos.`);
+}
+function resetRefreshCountdown() { countdownSeconds = refreshIntervalSeconds; renderRefreshCountdown(); }
+function scheduleCountdown() {
+  window.clearInterval(countdownTimer);
+  resetRefreshCountdown();
+  countdownTimer = window.setInterval(() => {
+    if (document.hidden) return;
+    countdownSeconds = Math.max(0, countdownSeconds - 1);
+    renderRefreshCountdown();
+  }, 1000);
+}
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshData(); });
 window.addEventListener("resize", () => { window.clearTimeout(resizeTimer); resizeTimer = window.setTimeout(renderCharts, 150); });
 analyticsRetry.addEventListener("click", () => {
@@ -504,5 +563,5 @@ analyticsRetry.addEventListener("click", () => {
     loadMatch(selectedId, { preserveAnalysis: true });
   } else loadHistory(selectedId);
 });
-refresh.addEventListener("click", () => { loadLive(); if (selectedId) loadMatch(selectedId); });
-loadLive(); schedulePolling();
+refresh.addEventListener("click", () => { resetRefreshCountdown(); loadLive(); if (selectedId) loadMatch(selectedId); });
+loadLive(); schedulePolling(); scheduleCountdown();

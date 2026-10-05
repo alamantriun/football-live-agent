@@ -19,7 +19,13 @@
         <section id="match-detail" class="match-detail" aria-live="polite" aria-busy="true"><div class="empty-reading"><span>↗</span><h2>Elige un partido</h2><p>Las lecturas publicadas aparecerán aquí con su contexto y sus límites.</p></div></section>
       </section>
       <section class="analytics" aria-labelledby="analytics-heading" hidden>
-        <h2 id="analytics-heading">Análisis en vivo</h2>
+        <div class="analytics-heading-row">
+          <h2 id="analytics-heading">Análisis en vivo</h2>
+          <div id="refresh-countdown" class="refresh-countdown" role="status" aria-live="off">
+            <span id="refresh-countdown-ring" class="refresh-countdown-ring" aria-hidden="true"><strong id="refresh-countdown-value">20</strong></span>
+            <span class="refresh-countdown-copy"><span>Próxima actualización</span><b id="refresh-countdown-label">en 20 s</b></span>
+          </div>
+        </div>
         <p id="analytics-status" role="status" aria-live="polite" hidden>Selecciona un partido para consultar su historial.</p>
         <button id="analytics-retry" class="analytics-retry" type="button" hidden>Reintentar análisis</button>
         <div class="analytics-flow">
@@ -60,6 +66,10 @@
             <section aria-labelledby="markets-heading">
               <h3 id="markets-heading">Goles y ambos equipos marcan</h3>
               <p class="muted">Escenarios del modelo · más/menos de 2,5 goles.</p>
+              <div id="btts-visual" class="btts-visual" role="img" aria-label="Dato no disponible" hidden>
+                <span id="btts-ring" class="btts-ring" aria-hidden="true"><strong id="btts-ring-value">—</strong></span>
+                <span class="btts-copy"><small>Ambos equipos marcan</small><strong id="btts-yes">Sí —</strong><span id="btts-no">No —</span></span>
+              </div>
               <dl id="market-probabilities" class="analysis-rows"><dt>Lectura</dt><dd>Dato no disponible</dd></dl>
             </section>
           </section>
