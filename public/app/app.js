@@ -154,7 +154,7 @@ function renderMatchList(items) {
 function probabilityCard(label, value) {
   const row = element("div", "probability");
   const available = Number.isFinite(value);
-  row.append(element("span", "", label), element("strong", "", available ? `${value}%` : "Dato no disponible"));
+  row.append(element("span", "", label), element("strong", "", available ? `${Number(value).toFixed(2)}%` : "Dato no disponible"));
   if (available) { const bar = element("i"); bar.style.setProperty("--percent", `${Math.max(0, Math.min(100, Number(value)))}%`); row.append(bar); }
   return row;
 }

@@ -290,7 +290,7 @@ test("20s polling updates selected score and 1X2 before history without clearing
   assert.equal(h.nodes.get("#team-stats").textContent, statsBefore);
   detail.resolve({ item: { ...summary(A), score_home: 2, score_away: 1, minute: 65, probabilities: { home: 80.125, draw: 10, away: 9.875 } }, data_status: "fresh", model_version: "poll-model" });
   await h.flush();
-  assert.match(h.nodes.get("#match-detail").textContent, /2—1.*65'.*80\.125%/);
+  assert.match(h.nodes.get("#match-detail").textContent, /2—1.*65'.*Alpha 80\.13%.*Empate 10\.00%.*Away 9\.88%/);
   const refreshedHistory = h.requests.at(-1);
   assert.ok(refreshedHistory.url.endsWith("/history?limit=90"));
   assert.equal(h.nodes.get("#team-stats").hidden, false);
