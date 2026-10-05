@@ -242,9 +242,32 @@ test("both teams to score uses an accessible visual instead of generic market ro
   const h = await harness(); await selected(h);
   const visual = h.nodes.get("#btts-visual");
   assert.equal(visual?.hidden, false);
-  assert.match(visual?.textContent || "", /Sí 10\.00%.*No 90\.00%/);
+  assert.match(visual?.textContent || "", /Sí\s*10\s*\.00\s*%.*No\s*90\s*\.00\s*%/);
   assert.match(visual?.attributes["aria-label"] || "", /sí 10\.00%.*no 90\.00%/i);
   assert.doesNotMatch(h.nodes.get("#market-probabilities").textContent, /Ambos marcan/);
+});
+
+test("visual decimal motion keeps the published probability available to assistive technology", async () => {
+  const h = await harness(); await selected(h);
+  const walk = node => [node, ...node.children.flatMap(walk)];
+  const decimals = walk(h.nodes.get("#match-detail")).filter(node => node.className === "probability-visual-decimal");
+  const bases = walk(h.nodes.get("#match-detail")).filter(node => node.className === "sr-only");
+  assert.equal(decimals.length, 2, "only available 1X2 probabilities receive the visual decimal layer");
+  assert.equal(decimals[1].attributes["aria-hidden"], "true");
+  assert.match(bases.map(node => node.textContent).join(" "), /50%/);
+  const before = decimals[1].textContent;
+  h.intervals[2]();
+  assert.notEqual(decimals[1].textContent, before, "only the decorative decimal digits change between provider reads");
+});
+
+test("both teams to score is placed immediately after the Monte Carlo matrix", async () => {
+  const h = await harness(); await selected(h);
+  const bttsSection = h.nodes.get("#btts-section");
+  assert.ok(bttsSection, "BTTS has its own section");
+  const flow = h.nodes.get("#score-matrix").parentElement.parentElement;
+  const matrixIndex = flow.children.indexOf(h.nodes.get("#score-matrix").parentElement);
+  assert.equal(flow.children[matrixIndex + 1], bttsSection);
+  assert.equal(bttsSection.hidden, false);
 });
 
 test("selected live match exposes broadcast badges and motion hooks", async () => {
@@ -322,7 +345,7 @@ test("20s polling updates selected score and 1X2 before history without clearing
   assert.equal(h.nodes.get("#team-stats").textContent, statsBefore);
   detail.resolve({ item: { ...summary(A), score_home: 2, score_away: 1, minute: 65, probabilities: { home: 80.125, draw: 10, away: 9.875 } }, data_status: "fresh", model_version: "poll-model" });
   await h.flush();
-  assert.match(h.nodes.get("#match-detail").textContent, /2—1.*65'.*Alpha 80\.13%.*Empate 10\.00%.*Away 9\.88%/);
+  assert.match(h.nodes.get("#match-detail").textContent, /2—1.*65'.*Alpha 80\s*\.13\s*%.*Empate 10\s*\.00\s*%.*Away 9\s*\.88\s*%/);
   assert.match(h.nodes.get("#match-detail").children[1].children[1].className, /value-changed/);
   assert.match(h.nodes.get("#match-detail").children[2].children[0].children[1].className, /value-changed/);
   const refreshedHistory = h.requests.at(-1);

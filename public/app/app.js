@@ -34,6 +34,9 @@ let refreshTimer = null;
 const refreshIntervalSeconds = 20;
 let countdownSeconds = refreshIntervalSeconds;
 let countdownTimer = null;
+let visualDecimalTimer = null;
+let visualDecimalTick = 0;
+let visualDecimalNodes = [];
 const analyticsArea = document.querySelector(".analytics");
 const analyticsStatus = document.querySelector("#analytics-status");
 const analyticsRetry = document.querySelector("#analytics-retry");
@@ -52,6 +55,7 @@ const refreshCountdownRing = document.querySelector("#refresh-countdown-ring");
 const refreshCountdownValue = document.querySelector("#refresh-countdown-value");
 const refreshCountdownLabel = document.querySelector("#refresh-countdown-label");
 const bttsVisual = document.querySelector("#btts-visual");
+const bttsSection = document.querySelector("#btts-section");
 const bttsRing = document.querySelector("#btts-ring");
 const bttsRingValue = document.querySelector("#btts-ring-value");
 const bttsYes = document.querySelector("#btts-yes");
@@ -71,6 +75,42 @@ function element(tag, className, text) {
 
 function initials(name) {
   return String(name || "?").trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "?";
+}
+
+function clearVisualDecimals(group) {
+  visualDecimalNodes = visualDecimalNodes.filter(entry => entry.group !== group);
+}
+
+function visualProbability(value, group) {
+  const numeric = Number(value);
+  const [integer, decimal] = numeric.toFixed(2).split(".");
+  const wrapper = element("span", "probability-visual-value");
+  const visual = element("span", "probability-visual");
+  visual.setAttribute("aria-hidden", "true");
+  const decimalNode = element("span", "probability-visual-decimal", `.${decimal}`);
+  decimalNode.setAttribute("aria-hidden", "true");
+  decimalNode.dataset.baseDecimal = decimal;
+  decimalNode.dataset.visualIndex = String(visualDecimalNodes.length);
+  visual.append(element("span", "probability-integer", integer), decimalNode, element("span", "probability-suffix", "%"));
+  wrapper.append(visual, element("span", "sr-only", `${numeric}%`));
+  visualDecimalNodes.push({ group, node: decimalNode });
+  return wrapper;
+}
+
+function refreshVisualDecimals() {
+  visualDecimalTick += 1;
+  const offsets = [1, -1, 2, -2, 1, -1];
+  for (const { node } of visualDecimalNodes) {
+    const base = Number(node.dataset.baseDecimal);
+    const offset = offsets[(visualDecimalTick + Number(node.dataset.visualIndex || 0)) % offsets.length];
+    const next = Math.max(0, Math.min(99, base + offset));
+    node.textContent = `.${String(next).padStart(2, "0")}`;
+  }
+}
+
+function scheduleVisualDecimals() {
+  window.clearInterval(visualDecimalTimer);
+  visualDecimalTimer = window.setInterval(() => { if (!document.hidden) refreshVisualDecimals(); }, 900);
 }
 
 function safeLogo(url) {
@@ -196,7 +236,9 @@ function renderMatchList(items) {
 function probabilityCard(label, value, changed = false) {
   const row = element("div", changed ? "probability value-changed" : "probability");
   const available = Number.isFinite(value);
-  row.append(element("span", "", label), element("strong", "", available ? `${Number(value).toFixed(2)}%` : "Dato no disponible"));
+  const reading = element("strong", "", available ? undefined : "Dato no disponible");
+  if (available) reading.append(visualProbability(value, "summary"));
+  row.append(element("span", "", label), reading);
   if (available) { const bar = element("i"); bar.style.setProperty("--percent", `${Math.max(0, Math.min(100, Number(value)))}%`); row.append(bar); }
   return row;
 }
@@ -220,6 +262,7 @@ function renderDetail(item) {
   detailSnapshot = nextDetailSnapshot;
   detail.dataset.liveState = visualState;
   analyticsArea.dataset.liveState = visualState;
+  clearVisualDecimals("summary");
   detail.replaceChildren();
   const top = element("div", "detail-topline");
   top.append(element("span", "", item.competition || "Lectura en vivo"), liveBadge(item), element("span", `quality ${item.data_status}`, item.data_status === "degraded" ? "Datos parciales" : `Datos ${item.data_status}`));
@@ -322,12 +365,15 @@ function resetAnalytics() {
   }
   teamStats.replaceChildren(); teamStats.hidden = true; teamStats.parentElement.hidden = true;
   scenarioMarkets.hidden = true;
+  bttsSection.hidden = true;
   bttsVisual.hidden = true;
   bttsVisual.setAttribute("aria-label", "Ambos equipos marcan: dato no disponible.");
   bttsRing.style.setProperty("--yes", "0");
   bttsRingValue.textContent = "—";
   bttsYes.textContent = "Sí —";
   bttsNo.textContent = "No —";
+  clearVisualDecimals("scenario");
+  clearVisualDecimals("matrix");
   for (const node of [nextGoal, marketProbabilities, goalsDistribution, scorelines, scoreMatrix]) node.replaceChildren();
   goalsDistribution.hidden = true; scorelines.hidden = true;
   goalsDistribution.parentElement.parentElement.hidden = true;
@@ -389,13 +435,15 @@ function renderTeamStats(point, matchId) {
 
 function percentageRow(target, label, value, ordered = false) {
   const available = Number.isFinite(value);
-  const copy = available ? `${value}%` : "Dato no disponible";
   const bar = element("span", "analysis-bar"); bar.setAttribute("aria-hidden", "true");
   if (available) bar.style.setProperty("--percent", `${Math.max(0, Math.min(100, value))}%`);
   if (ordered) {
-    const row = element("li", "", `${label}: ${copy}`); if (available) row.append(bar); target.append(row);
+    const row = element("li", "", `${label}: `);
+    row.append(available ? visualProbability(value, "scenario") : element("span", "", "Dato no disponible"));
+    if (available) row.append(bar); target.append(row);
   } else {
-    const term = element("dt", "", label); const valueNode = element("dd", "", copy);
+    const term = element("dt", "", label); const valueNode = element("dd", "", available ? undefined : "Dato no disponible");
+    if (available) valueNode.append(visualProbability(value, "scenario"));
     if (available) valueNode.append(bar); target.append(term, valueNode);
   }
 }
@@ -406,6 +454,7 @@ function probabilityLabel(value) {
 
 function renderBtts(yes, no, available) {
   bttsVisual.hidden = !available;
+  bttsSection.hidden = !available;
   if (!available) {
     bttsVisual.setAttribute("aria-label", "Ambos equipos marcan: dato no disponible.");
     return;
@@ -415,13 +464,14 @@ function renderBtts(yes, no, available) {
   const yesLabel = probabilityLabel(yesValue);
   const noLabel = probabilityLabel(noValue);
   bttsRing.style.setProperty("--yes", String(yesValue));
-  bttsRingValue.textContent = yesLabel;
-  bttsYes.textContent = `Sí ${yesLabel}`;
-  bttsNo.textContent = `No ${noLabel}`;
+  bttsRingValue.replaceChildren(visualProbability(yesValue, "scenario"));
+  bttsYes.replaceChildren(element("span", "", "Sí "), visualProbability(yesValue, "scenario"));
+  bttsNo.replaceChildren(element("span", "", "No "), visualProbability(noValue, "scenario"));
   bttsVisual.setAttribute("aria-label", `Ambos equipos marcan: sí ${yesLabel}, no ${noLabel}.`);
 }
 
 function renderScoreMatrix(rows, matchId) {
+  clearVisualDecimals("matrix");
   scoreMatrix.replaceChildren();
   scoreMatrix.hidden = !rows.length;
   scoreMatrix.parentElement.hidden = !rows.length;
@@ -446,7 +496,8 @@ function renderScoreMatrix(rows, matchId) {
       const available = Number.isFinite(probability);
       const key = `${home}:${away}`;
       const changed = Boolean(previousValues?.has(key) && previousValues.get(key) !== probability);
-      const cell = element("span", changed ? "score-matrix-cell matrix-cell-changed" : "score-matrix-cell", available ? `${probability}%` : "—");
+      const cell = element("span", changed ? "score-matrix-cell matrix-cell-changed" : "score-matrix-cell", available ? undefined : "—");
+      if (available) cell.append(visualProbability(probability, "matrix"));
       cell.setAttribute("role", "cell");
       cell.setAttribute("aria-label", `Local ${home}, visitante ${away}: ${available ? `${probability}%` : "dato no disponible"}`);
       if (available) cell.style.setProperty("--heat", String(Math.max(0.06, Math.min(0.9, probability / 35))));
@@ -458,6 +509,7 @@ function renderScoreMatrix(rows, matchId) {
 
 function renderScenarios(analytics, dataStatus, modelVersion, matchId) {
   const allowed = ["fresh", "degraded"].includes(dataStatus);
+  clearVisualDecimals("scenario");
   for (const node of [nextGoal, marketProbabilities, goalsDistribution, scorelines, scoreMatrix]) node.replaceChildren();
   const nextAvailable = allowed && analytics.next_goal != null;
   const marketsAvailable = allowed && analytics.markets != null;
@@ -564,4 +616,4 @@ analyticsRetry.addEventListener("click", () => {
   } else loadHistory(selectedId);
 });
 refresh.addEventListener("click", () => { resetRefreshCountdown(); loadLive(); if (selectedId) loadMatch(selectedId); });
-loadLive(); schedulePolling(); scheduleCountdown();
+loadLive(); schedulePolling(); scheduleCountdown(); scheduleVisualDecimals();

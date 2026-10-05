@@ -20,7 +20,7 @@
       </section>
       <section class="analytics" aria-labelledby="analytics-heading" hidden>
         <div class="analytics-heading-row">
-          <h2 id="analytics-heading">Análisis en vivo</h2>
+          <div class="analytics-title"><h2 id="analytics-heading">Análisis en vivo</h2><span class="visual-simulation-note">Decimales: simulación visual</span></div>
           <div id="refresh-countdown" class="refresh-countdown" role="status" aria-live="off">
             <span id="refresh-countdown-ring" class="refresh-countdown-ring" aria-hidden="true"><strong id="refresh-countdown-value">20</strong></span>
             <span class="refresh-countdown-copy"><span>Próxima actualización</span><b id="refresh-countdown-label">en 20 s</b></span>
@@ -33,6 +33,14 @@
             <h3 id="score-matrix-heading">Matriz probabilística · vista Monte Carlo</h3>
             <p id="score-matrix-summary" class="muted">Probabilidad de cada marcador final. Local en filas y visitante en columnas; 6+ agrupa la cola.</p>
             <div id="score-matrix" class="score-matrix" role="table" aria-label="Matriz de probabilidades de marcadores posibles" aria-describedby="score-matrix-summary" hidden></div>
+          </section>
+          <section id="btts-section" aria-labelledby="btts-heading" hidden>
+            <h3 id="btts-heading">Ambos equipos marcan</h3>
+            <p class="muted">Escenario del modelo. Los decimales que se mueven son un efecto visual; el valor base publicado conserva la lectura real.</p>
+            <div id="btts-visual" class="btts-visual" role="img" aria-label="Dato no disponible" hidden>
+              <span id="btts-ring" class="btts-ring" aria-hidden="true"><strong id="btts-ring-value">—</strong></span>
+              <span class="btts-copy"><small>Probabilidad publicada</small><strong id="btts-yes">Sí —</strong><span id="btts-no">No —</span></span>
+            </div>
           </section>
           <section aria-labelledby="probability-heading" hidden>
             <h3 id="probability-heading">Historial de probabilidades</h3>
@@ -64,12 +72,8 @@
               <dl id="next-goal" class="analysis-rows"><dt>Lectura</dt><dd>Dato no disponible</dd></dl>
             </section>
             <section aria-labelledby="markets-heading">
-              <h3 id="markets-heading">Goles y ambos equipos marcan</h3>
+              <h3 id="markets-heading">Más o menos de 2,5 goles</h3>
               <p class="muted">Escenarios del modelo · más/menos de 2,5 goles.</p>
-              <div id="btts-visual" class="btts-visual" role="img" aria-label="Dato no disponible" hidden>
-                <span id="btts-ring" class="btts-ring" aria-hidden="true"><strong id="btts-ring-value">—</strong></span>
-                <span class="btts-copy"><small>Ambos equipos marcan</small><strong id="btts-yes">Sí —</strong><span id="btts-no">No —</span></span>
-              </div>
               <dl id="market-probabilities" class="analysis-rows"><dt>Lectura</dt><dd>Dato no disponible</dd></dl>
             </section>
           </section>
