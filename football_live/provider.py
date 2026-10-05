@@ -135,6 +135,8 @@ class ProviderSnapshot(StrictDomainModel):
     minute: MatchMinute | None
     score_home: Score
     score_away: Score
+    home_logo_url: str | None = None
+    away_logo_url: str | None = None
     stats: ProviderStats
     provider_observed_at: AwareDatetime
     quality: DataStatus
@@ -345,6 +347,8 @@ class ProviderAdapter:
             minute=minute,
             score_home=score_home,
             score_away=score_away,
+            home_logo_url=_competitor_logo_url(home),
+            away_logo_url=_competitor_logo_url(away),
             stats=stats,
             provider_observed_at=self._clock(),
             quality=DataStatus.DEGRADED if partial else DataStatus.FRESH,

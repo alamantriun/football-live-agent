@@ -69,6 +69,10 @@ class FakeQuery:
         self.operation["payload"] = payload
         return self
 
+    def update(self, payload):
+        self.operation["payload"] = payload
+        return self
+
     def eq(self, column, value):
         self.operation.setdefault("filters", []).append(("eq", column, value))
         return self
@@ -538,6 +542,24 @@ def test_fixture_upsert_uses_private_schema_conflict_and_canonical_payload(
 def test_empty_fixture_upsert_does_not_create_an_operation(gateway, fake_client):
     assert gateway.upsert_fixtures([]) == 0
     assert fake_client.operations == []
+
+
+def test_sync_live_fixture_logos_updates_only_public_logo_columns(
+    gateway, fake_client, fixture
+):
+    gateway.sync_live_fixture_logos(fixture)
+
+    assert fake_client.operations[-1] == {
+        "schema": "public",
+        "kind": "table",
+        "name": "live_match_projection",
+        "params": None,
+        "payload": {
+            "home_logo_url": fixture.home_logo_url,
+            "away_logo_url": fixture.away_logo_url,
+        },
+        "filters": [("eq", "public_id", str(fixture.public_id))],
+    }
 
 
 def test_active_fixtures_uses_private_schema_bounded_select_and_limit(

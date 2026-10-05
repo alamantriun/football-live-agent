@@ -64,6 +64,8 @@ def make_provider_snapshot(
     score_home: int = 1,
     score_away: int = 0,
     observed_at: datetime = NOW,
+    home_logo_url: str | None = None,
+    away_logo_url: str | None = None,
 ) -> ProviderSnapshot:
     return ProviderSnapshot(
         provider_fixture_id=fixture.provider_fixture_id,
@@ -75,6 +77,8 @@ def make_provider_snapshot(
         stats=ProviderStats(),
         provider_observed_at=observed_at,
         quality=DataStatus.DEGRADED,
+        home_logo_url=home_logo_url,
+        away_logo_url=away_logo_url,
         sanitized_provider_data={"status": status},
     )
 
@@ -110,6 +114,7 @@ class FakeRepository:
         self.snapshots = []
         self.predictions = []
         self.published_predictions = []
+        self.synced_live_logos = []
         self.outcomes = []
         self.reviews = []
         self.model = make_active_model()
@@ -142,6 +147,9 @@ class FakeRepository:
 
     def publish_live_prediction(self, fixture, snapshot, prediction, model):
         self.published_predictions.append((fixture, snapshot, prediction, model))
+
+    def sync_live_fixture_logos(self, fixture):
+        self.synced_live_logos.append(fixture)
 
     def active_model(self):
         return self.model
@@ -353,6 +361,35 @@ async def test_collect_caps_at_12_uses_concurrency_two_and_skips_stale_sentinel(
     }
     assert repo.finishes[-1][2] == "succeeded"
     assert repo.finishes[-1][-1] is None
+
+
+@pytest.mark.asyncio
+async def test_collect_backfills_provider_logos_even_when_match_has_finished():
+    repo = FakeRepository()
+    fixture = make_fixture(1, home_logo_url=None, away_logo_url=None)
+    repo.fixtures = [fixture]
+    snapshot = make_provider_snapshot(
+        fixture,
+        status="full time",
+        home_logo_url="https://imagecache.365scores.com/home",
+        away_logo_url="https://imagecache.365scores.com/away",
+    )
+
+    result = await run_collect(
+        repo,
+        FakeProvider(snapshots={fixture.provider_fixture_id: snapshot}),
+        FakePredictor(),
+        HTTP_REQUEST_ID,
+        "collect:logo-backfill",
+    )
+
+    assert result.status == "succeeded"
+    assert len(repo.upserted) == 1
+    assert repo.upserted[0].home_logo_url == snapshot.home_logo_url
+    assert repo.upserted[0].away_logo_url == snapshot.away_logo_url
+    assert repo.synced_live_logos == repo.upserted
+    assert result.counters["skipped_predictions"] == 1
+    assert repo.snapshots == []
 
 
 @pytest.mark.asyncio

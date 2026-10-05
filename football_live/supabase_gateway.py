@@ -115,6 +115,21 @@ class SupabaseGateway:
         )
         return len(self._rows(response))
 
+    def sync_live_fixture_logos(self, fixture: Fixture) -> None:
+        if fixture.public_id is None:
+            raise ValueError("persisted public fixture is required")
+        payload = {
+            "home_logo_url": fixture.home_logo_url,
+            "away_logo_url": fixture.away_logo_url,
+        }
+        self._execute(
+            lambda: self._client.schema("public")
+            .table("live_match_projection")
+            .update(payload)
+            .eq("public_id", str(fixture.public_id))
+            .execute()
+        )
+
     @staticmethod
     def _fixture_payload(fixture: Fixture) -> dict[str, Any]:
         dumped = fixture.model_dump(mode="json")

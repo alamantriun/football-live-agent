@@ -84,6 +84,17 @@ def _snapshot_from_provider(fixture: Fixture, item: ProviderSnapshot) -> LiveSna
     )
 
 
+def _fixture_with_provider_logos(
+    fixture: Fixture, item: ProviderSnapshot
+) -> Fixture:
+    updates = {}
+    if item.home_logo_url and item.home_logo_url != fixture.home_logo_url:
+        updates["home_logo_url"] = item.home_logo_url
+    if item.away_logo_url and item.away_logo_url != fixture.away_logo_url:
+        updates["away_logo_url"] = item.away_logo_url
+    return fixture.model_copy(update=updates) if updates else fixture
+
+
 async def _run_claimed(
     *,
     repo: Any,
@@ -179,6 +190,24 @@ async def run_collect(repo, provider, predictor, request_id: UUID, key: str) -> 
                 except Exception:
                     counters["provider_errors"] += 1
                     return
+
+                hydrated_fixture = _fixture_with_provider_logos(
+                    fixture, provider_snapshot
+                )
+                if hydrated_fixture is not fixture:
+                    try:
+                        repo.upsert_fixtures([hydrated_fixture])
+                        repo.sync_live_fixture_logos(hydrated_fixture)
+                        fixture = hydrated_fixture
+                    except Exception:
+                        counters["processing_errors"] += 1
+                        stage_counts = counters.setdefault(
+                            "processing_error_stages", {}
+                        )
+                        stage_counts["fixture_logos"] = (
+                            stage_counts.get("fixture_logos", 0) + 1
+                        )
+                        return
 
                 status = _plain_status(
                     provider_snapshot.sanitized_provider_data.get("status")

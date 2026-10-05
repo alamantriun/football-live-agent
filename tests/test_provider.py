@@ -146,9 +146,10 @@ def test_client_constructs_fixed_outbound_transport(monkeypatch):
 
 
 def test_partial_snapshot_preserves_missing_stats_and_real_zero():
-    snapshot = ProviderAdapter(clock=lambda: OBSERVED_AT).parse_snapshot(
-        load_fixture("game_partial.json")
-    )
+    payload = load_fixture("game_partial.json")
+    payload["game"]["homeCompetitor"]["imageVersion"] = 4
+    payload["game"]["awayCompetitor"]["imageVersion"] = 8
+    snapshot = ProviderAdapter(clock=lambda: OBSERVED_AT).parse_snapshot(payload)
 
     assert snapshot.provider_fixture_id == "123456789"
     assert snapshot.home_name == "Club Norte"
@@ -161,6 +162,8 @@ def test_partial_snapshot_preserves_missing_stats_and_real_zero():
     assert snapshot.stats.shots_on_target.away is None
     assert snapshot.stats.expected_goals.away == 0
     assert snapshot.quality == "degraded"
+    assert snapshot.home_logo_url.endswith("/v4/Competitors/11")
+    assert snapshot.away_logo_url.endswith("/v8/Competitors/22")
 
 
 def test_live_list_uses_canonical_fields_and_internal_live_status():
