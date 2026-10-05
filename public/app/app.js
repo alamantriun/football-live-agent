@@ -1,3 +1,5 @@
+import { drawLineChart, clearChart } from "./charts.js";
+
 const list = document.querySelector("#match-list");
 const detail = document.querySelector("#match-detail");
 const status = document.querySelector("#data-status");
@@ -14,8 +16,25 @@ const featuredClubLogos = new Map([
 const publicIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 let liveItems = [];
 let selectedId = null;
-let controller = null;
+let listController = null;
+let detailController = null;
+let historyController = null;
+let selectionVersion = 0;
+let chartState = null;
+let resizeTimer = null;
 let refreshTimer = null;
+const analyticsArea = document.querySelector(".analytics");
+const analyticsStatus = document.querySelector("#analytics-status");
+const analyticsRetry = document.querySelector("#analytics-retry");
+const probabilityCanvas = document.querySelector("#probability-history");
+const activityCanvas = document.querySelector("#activity-chart");
+const teamStats = document.querySelector("#team-stats");
+const scenarioMarkets = document.querySelector("#scenario-markets");
+const nextGoal = document.querySelector("#next-goal");
+const marketProbabilities = document.querySelector("#market-probabilities");
+const goalsDistribution = document.querySelector("#goals-distribution");
+const scorelines = document.querySelector("#scorelines");
+const evidence = document.querySelector("#analytics-evidence");
 
 function setStatus(message, state) {
   status.textContent = message;
@@ -57,13 +76,29 @@ function clubMark(name, logoUrl) {
   return mark;
 }
 
-function fetchWithTimeout(path) {
-  if (controller) controller.abort();
-  controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 8000);
-  return fetch(path, { signal: controller.signal, headers: { Accept: "application/json" } })
-    .then((response) => response.ok ? response.json() : Promise.reject(new Error("request failed")))
-    .finally(() => window.clearTimeout(timeout));
+async function fetchWithTimeout(path, requestController) {
+  let timeout;
+  let onAbort;
+  try {
+    return await Promise.race([
+      fetch(path, { signal: requestController.signal, headers: { Accept: "application/json" } })
+        .then((response) => response.ok ? response.json() : Promise.reject(new Error("request failed"))),
+      new Promise((_, reject) => {
+        timeout = window.setTimeout(() => {
+          reject(new Error("timeout"));
+          requestController.abort();
+        }, 8000);
+      }),
+      new Promise((_, reject) => {
+        onAbort = () => reject(new DOMException("Aborted", "AbortError"));
+        requestController.signal.addEventListener("abort", onAbort, { once: true });
+        if (requestController.signal.aborted) onAbort();
+      }),
+    ]);
+  } finally {
+    window.clearTimeout(timeout);
+    requestController.signal.removeEventListener("abort", onAbort);
+  }
 }
 
 function loadFavorites() {
@@ -98,8 +133,8 @@ function renderMatchList(items) {
 
 function probabilityCard(label, value) {
   const row = element("div", "probability");
-  const available = Number.isFinite(Number(value));
-  row.append(element("span", "", label), element("strong", "", available ? `${Number(value).toFixed(0)}%` : "Dato no disponible"));
+  const available = Number.isFinite(value);
+  row.append(element("span", "", label), element("strong", "", available ? `${value}%` : "Dato no disponible"));
   if (available) { const bar = element("i"); bar.style.setProperty("--percent", `${Math.max(0, Math.min(100, Number(value)))}%`); row.append(bar); }
   return row;
 }
@@ -128,18 +163,212 @@ function renderDetail(item) {
 
 async function loadMatch(id) {
   if (!publicIdPattern.test(id)) return;
-  selectedId = id; detail.setAttribute("aria-busy", "true"); setStatus("Actualizando la lectura del partido…", "loading");
-  try { const response = await fetchWithTimeout("/api/matches/" + encodeURIComponent(id)); const item = response.item; renderDetail(item); setStatus(item.data_status === "degraded" ? "Datos parciales: la lectura conserva señales ausentes." : "Lectura actualizada.", item.data_status); renderMatchList(liveItems); }
-  catch { detail.setAttribute("aria-busy", "false"); setStatus("No pudimos actualizar el partido. Puedes intentarlo de nuevo.", "error"); }
+  // Invalidate history before waiting for the newly selected summary.
+  if (historyController) historyController.abort();
+  historyController = null;
+  if (detailController) detailController.abort();
+  const requestController = new AbortController();
+  detailController = requestController;
+  const version = ++selectionVersion;
+  selectedId = id;
+  resetAnalytics();
+  renderAnalyticsState("loading", "Cargando historial del partido…");
+  renderMatchList(liveItems);
+  detail.setAttribute("aria-busy", "true"); setStatus("Actualizando la lectura del partido…", "loading");
+  try {
+    const response = await fetchWithTimeout("/api/matches/" + encodeURIComponent(id), requestController);
+    if (version !== selectionVersion || requestController.signal.aborted) return;
+    if (response.item?.public_id !== id) throw new Error("mismatched match");
+    const item = { ...response.item, data_status: response.data_status ?? response.item.data_status, model_version: response.model_version ?? response.item.model_version };
+    renderDetail(item);
+    setStatus(item.data_status === "degraded" ? "Datos parciales: la lectura conserva señales ausentes." : "Lectura actualizada.", item.data_status);
+    detailController = null;
+    await loadHistory(id, version);
+  } catch (error) {
+    if (version !== selectionVersion || (error.name === "AbortError")) return;
+    detail.setAttribute("aria-busy", "false");
+    setStatus("No pudimos actualizar el partido. Puedes intentarlo de nuevo.", "error");
+    renderAnalyticsState("error", "No pudimos cargar la lectura. Usa Actualizar para intentarlo de nuevo.");
+  } finally { if (detailController === requestController) detailController = null; }
 }
 
 async function loadLive() {
-  setStatus("Cargando partidos disponibles…", "loading");
-  try { const response = await fetchWithTimeout("/api/live?limit=24"); liveItems = Array.isArray(response.items) ? response.items.filter((item) => publicIdPattern.test(item.public_id || "")) : []; renderMatchList(liveItems); if (!liveItems.length) setStatus("No hay partidos publicados en este momento.", "empty"); else setStatus("Partidos actualizados. Selecciona uno para leer su contexto.", response.data_status || "fresh"); }
-  catch { list.replaceChildren(element("p", "muted", "No pudimos cargar los partidos.")); setStatus("Servicio no disponible temporalmente.", "error"); }
+  if (listController) listController.abort();
+  const requestController = new AbortController();
+  listController = requestController;
+  if (!selectedId) setStatus("Cargando partidos disponibles…", "loading");
+  try {
+    const response = await fetchWithTimeout("/api/live?limit=24", requestController);
+    if (listController !== requestController || requestController.signal.aborted) return;
+    liveItems = Array.isArray(response.items) ? response.items.filter((item) => publicIdPattern.test(item.public_id || "")) : [];
+    renderMatchList(liveItems);
+    if (!selectedId) {
+      if (!liveItems.length) setStatus("No hay partidos publicados en este momento.", "empty");
+      else setStatus("Partidos actualizados. Selecciona uno para leer su contexto.", response.data_status || "fresh");
+    }
+  } catch (error) {
+    if (listController !== requestController || error.name === "AbortError") return;
+    list.replaceChildren(element("p", "muted", "No pudimos cargar los partidos."));
+    if (!selectedId) setStatus("Servicio no disponible temporalmente.", "error");
+  } finally { if (listController === requestController) listController = null; }
 }
 
-function schedulePolling() { window.clearInterval(refreshTimer); refreshTimer = window.setInterval(() => { if (!document.hidden) loadLive(); }, 20000); }
-document.addEventListener("visibilitychange", () => { if (!document.hidden) loadLive(); });
-refresh.addEventListener("click", loadLive);
+function renderAnalyticsState(state, message) {
+  analyticsArea.hidden = false;
+  analyticsStatus.hidden = false;
+  analyticsStatus.dataset.state = state;
+  analyticsStatus.textContent = message;
+  analyticsArea.setAttribute("aria-busy", String(state === "loading"));
+  analyticsRetry.hidden = state !== "error";
+}
+
+function resetAnalytics() {
+  chartState = null;
+  window.clearTimeout(resizeTimer);
+  for (const canvas of [probabilityCanvas, activityCanvas]) {
+    clearChart(canvas); canvas.hidden = true; canvas.parentElement.hidden = true;
+  }
+  teamStats.replaceChildren(); teamStats.hidden = true; teamStats.parentElement.hidden = true;
+  scenarioMarkets.hidden = true;
+  for (const node of [nextGoal, marketProbabilities, goalsDistribution, scorelines]) node.replaceChildren();
+  goalsDistribution.hidden = true; scorelines.hidden = true;
+  goalsDistribution.parentElement.parentElement.hidden = true;
+  evidence.replaceChildren(); evidence.hidden = true;
+}
+
+async function loadHistory(id, version = selectionVersion) {
+  if (!publicIdPattern.test(id) || selectedId !== id || version !== selectionVersion) return;
+  if (historyController) historyController.abort();
+  const requestController = new AbortController();
+  historyController = requestController;
+  renderAnalyticsState("loading", "Cargando historial del partido…");
+  try {
+    const response = await fetchWithTimeout("/api/matches/" + encodeURIComponent(id) + "/history?limit=90", requestController);
+    if (version !== selectionVersion || historyController !== requestController || requestController.signal.aborted) return;
+    if (response.item?.public_id !== id) throw new Error("mismatched history");
+    // Current age and model belong to the envelope, not to historical points.
+    renderAnalytics(response.item, response.data_status, response.model_version);
+  } catch (error) {
+    if (version !== selectionVersion || historyController !== requestController || error.name === "AbortError") return;
+    // An unsuccessful refresh must not keep old simulations looking current.
+    resetAnalytics();
+    renderAnalyticsState("error", "No pudimos cargar el historial a tiempo. Puedes reintentar el análisis.");
+  } finally { if (historyController === requestController) historyController = null; }
+}
+
+const statPairs = [
+  ["possession", "Posesión", "%"], ["shots", "Tiros", ""], ["shots_on_target", "Tiros a puerta", ""],
+  ["corners", "Córners", ""], ["yellow_cards", "Tarjetas amarillas", ""],
+  ["red_cards", "Tarjetas rojas", ""], ["expected_goals", "Goles esperados del proveedor", ""],
+];
+
+function renderTeamStats(point) {
+  teamStats.replaceChildren(); teamStats.hidden = false; teamStats.parentElement.hidden = false;
+  for (const [key, label, unit] of statPairs) {
+    const pair = point?.stats?.[key] || {};
+    const row = element("div"); row.append(element("dt", "", label));
+    const values = element("dd", "stat-pair");
+    const total = Number.isFinite(pair.home) && Number.isFinite(pair.away) ? pair.home + pair.away : null;
+    for (const side of ["home", "away"]) {
+      const value = pair[side]; const available = Number.isFinite(value);
+      const cell = element("span", "stat-value");
+      cell.append(element("span", "", `${side === "home" ? "Local" : "Visitante"}: ${available ? `${value}${unit}` : "— · Dato no disponible"}`));
+      if (available && total !== null) {
+        const bar = element("span", `stat-bar ${side}`); bar.setAttribute("aria-hidden", "true");
+        bar.style.setProperty("--percent", `${total > 0 ? Math.max(0, Math.min(100, value / total * 100)) : 0}%`); cell.append(bar);
+      }
+      values.append(cell);
+    }
+    row.append(values); teamStats.append(row);
+  }
+}
+
+function percentageRow(target, label, value, ordered = false) {
+  const available = Number.isFinite(value);
+  const copy = available ? `${value}%` : "Dato no disponible";
+  const bar = element("span", "analysis-bar"); bar.setAttribute("aria-hidden", "true");
+  if (available) bar.style.setProperty("--percent", `${Math.max(0, Math.min(100, value))}%`);
+  if (ordered) {
+    const row = element("li", "", `${label}: ${copy}`); if (available) row.append(bar); target.append(row);
+  } else {
+    const term = element("dt", "", label); const valueNode = element("dd", "", copy);
+    if (available) valueNode.append(bar); target.append(term, valueNode);
+  }
+}
+
+function renderScenarios(analytics, dataStatus, modelVersion) {
+  const allowed = ["fresh", "degraded"].includes(dataStatus);
+  for (const node of [nextGoal, marketProbabilities, goalsDistribution, scorelines]) node.replaceChildren();
+  const nextAvailable = allowed && analytics.next_goal != null;
+  const marketsAvailable = allowed && analytics.markets != null;
+  scenarioMarkets.hidden = !nextAvailable && !marketsAvailable;
+  nextGoal.parentElement.hidden = !nextAvailable; marketProbabilities.parentElement.hidden = !marketsAvailable;
+  scenarioMarkets.setAttribute("aria-label", `Escenarios experimentales del modelo ${modelVersion ?? "Dato no disponible"} · Datos ${dataStatus ?? "Dato no disponible"}`);
+  if (nextAvailable) for (const [key, label] of [["home", "Local"], ["none", "Sin más goles"], ["away", "Visitante"]]) percentageRow(nextGoal, label, analytics.next_goal[key]);
+  if (marketsAvailable) for (const [key, label] of [["over_2_5", "Más de 2,5 goles"], ["under_2_5", "Menos de 2,5 goles"], ["btts_yes", "Ambos marcan: sí"], ["btts_no", "Ambos marcan: no"]]) percentageRow(marketProbabilities, label, analytics.markets[key]);
+  const totals = allowed && Array.isArray(analytics.total_goals) ? analytics.total_goals : [];
+  const scores = allowed && Array.isArray(analytics.scorelines) ? analytics.scorelines : [];
+  goalsDistribution.hidden = !totals.length; goalsDistribution.parentElement.hidden = !totals.length;
+  scorelines.hidden = !scores.length; scorelines.parentElement.hidden = !scores.length;
+  goalsDistribution.parentElement.parentElement.hidden = !totals.length && !scores.length;
+  for (const row of totals) percentageRow(goalsDistribution, row.label, row.probability);
+  for (const row of scores) percentageRow(scorelines, `${row.home}—${row.away}`, row.probability, true);
+  if (!allowed) return `Datos ${dataStatus ?? "no disponibles"}: los escenarios están ocultos por la antigüedad o suspensión de la lectura.`;
+  if (!nextAvailable || !marketsAvailable || !totals.length || !scores.length) return "Dato no disponible: faltan tasas ajustadas válidas para algunos escenarios del modelo.";
+  return "Escenarios experimentales del modelo; no representan evidencia de precisión validada.";
+}
+
+function renderCharts() {
+  if (!chartState) return;
+  const { item } = chartState; const points = item.points;
+  const series = [["home", item.home_name, "#dfff54"], ["draw", "Empate", "#ffd94d"], ["away", item.away_name, "#ff9a85"]]
+    .map(([key, label, color]) => ({ label, color, values: points.map(point => Number.isFinite(point.probabilities?.[key]) ? point.probabilities[key] : null) }));
+  const probabilityTrend = series.some(row => row.values.filter(Number.isFinite).length >= 2);
+  if (probabilityTrend) drawLineChart(probabilityCanvas, series, { min: 0, max: 100, labels: points.map(point => point.minute == null ? point.provider_observed_at : `${point.minute}'`) });
+  else clearChart(probabilityCanvas, "Dato no disponible: se necesitan al menos dos observaciones válidas.");
+  const latest = points.at(-1)?.probabilities;
+  document.querySelector("#probability-summary").textContent = `${points.length} observaciones. ${probabilityTrend ? "Local, empate y visitante (%); los valores ausentes dejan huecos en la serie." : "Dato no disponible: una observación muestra estadísticas actuales, pero no basta para formar una tendencia."} Última lectura: ${["home", "draw", "away"].map(key => `${key === "home" ? "Local" : key === "draw" ? "Empate" : "Visitante"} ${Number.isFinite(latest?.[key]) ? `${latest[key]}%` : "Dato no disponible"}`).join(" · ")}`;
+  const trends = [];
+  const descriptions = [];
+  for (const [key, label, colors] of [["activity", "Actividad observada", ["#dfff54", "#ffd94d"]], ["momentum", "Momentum", ["#ff9a85", "#9ecfff"]]]) {
+    const values = Array.isArray(item.analytics?.[key]) ? item.analytics[key] : [];
+    for (const [index, side] of ["home", "away"].entries()) {
+      const samples = values.map(point => Number.isFinite(point[side]) ? point[side] : null);
+      if (samples.filter(Number.isFinite).length >= 2) {
+        trends.push({ label: `${label} ${side === "home" ? "local" : "visitante"}`, values: samples, color: colors[index] });
+        const latestValue = samples.at(-1);
+        descriptions.push(`${label} ${side === "home" ? "local" : "visitante"}: ${Number.isFinite(latestValue) ? latestValue : "Dato no disponible"}`);
+      } else descriptions.push(`${label} ${side === "home" ? "local" : "visitante"}: Dato no disponible`);
+    }
+  }
+  if (trends.length) drawLineChart(activityCanvas, trends, { min: 0, max: 100 });
+  else clearChart(activityCanvas, "Dato no disponible: faltan observaciones para una tendencia.");
+  document.querySelector("#activity-summary").textContent = `Índice experimental (0–100); no representa una probabilidad validada. ${descriptions.join(" · ")}. Los valores ausentes dejan huecos; momentum necesita cuatro puntos válidos de actividad.`;
+}
+
+function renderAnalytics(item, dataStatus, modelVersion) {
+  const points = Array.isArray(item.points) ? item.points : [];
+  const analytics = item.analytics || {};
+  chartState = { item: { ...item, points }, dataStatus, modelVersion };
+  for (const canvas of [probabilityCanvas, activityCanvas]) { canvas.hidden = false; canvas.parentElement.hidden = false; }
+  renderTeamStats(points.at(-1));
+  const scenarioMessage = renderScenarios(analytics, dataStatus, modelVersion);
+  evidence.hidden = false;
+  const coverage = analytics.coverage;
+  evidence.replaceChildren(element("p", "", `Cobertura: ${coverage && Number.isFinite(coverage.percent) ? `${coverage.available}/${coverage.total} (${coverage.percent}%)` : "Dato no disponible"} · Estado actual: ${dataStatus ?? "Dato no disponible"} · Calidad histórica: ${points.at(-1)?.quality ?? "Dato no disponible"} · Modelo: ${modelVersion ?? "Dato no disponible"} · Observado: ${points.at(-1)?.provider_observed_at ?? "Dato no disponible"}`));
+  renderAnalyticsState(points.length ? dataStatus : "empty", `${points.length ? "Historial actualizado." : "No hay observaciones publicadas."} ${scenarioMessage}`);
+  renderCharts();
+}
+
+function refreshData() {
+  loadLive();
+  // Capture selection now, never after an asynchronous list response. Polls do not
+  // supersede requests already serving a newer selection or a manual retry.
+  if (selectedId && !detailController && !historyController) loadHistory(selectedId, selectionVersion);
+}
+function schedulePolling() { window.clearInterval(refreshTimer); refreshTimer = window.setInterval(() => { if (!document.hidden) refreshData(); }, 20000); }
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshData(); });
+window.addEventListener("resize", () => { window.clearTimeout(resizeTimer); resizeTimer = window.setTimeout(renderCharts, 150); });
+analyticsRetry.addEventListener("click", () => { if (selectedId) loadHistory(selectedId); });
+refresh.addEventListener("click", () => { loadLive(); if (selectedId) loadMatch(selectedId); });
 loadLive(); schedulePolling();

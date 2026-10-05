@@ -14,6 +14,11 @@
 .stat-comparison>div{align-items:baseline;display:grid;gap:.6rem 1.5rem;grid-template-columns:minmax(0,1fr) minmax(0,2fr);padding:.75rem 0}
 .stat-comparison dt{font-weight:700;overflow-wrap:anywhere}
 .stat-comparison dd{margin:0;overflow-wrap:anywhere}
+.stat-pair{display:grid;gap:1rem;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.stat-value{display:flex;flex-direction:column;gap:.4rem;min-width:0;font-variant-numeric:tabular-nums}
+.analytics-status,.analytics-evidence{overflow-wrap:anywhere}
+#analytics-status[data-state=stale],#analytics-status[data-state=suspended],#analytics-status[data-state=error]{border-left:3px solid #ff9a85;padding-left:.8rem}
+.analysis-rows{font-variant-numeric:tabular-nums}
 .stat-comparison .stat-bar,.analysis-rows .analysis-bar{background:var(--lime);display:block;height:.4rem;max-width:100%;width:var(--percent,0%)}
 .stat-comparison .stat-bar.away{background:var(--yellow)}
 .analysis-rows{list-style:none;margin:1rem 0 0;padding:0}

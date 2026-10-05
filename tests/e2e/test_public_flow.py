@@ -7,6 +7,29 @@ import subprocess
 APP = Path("public/app")
 
 
+def test_live_analytics_behavior():
+    node = shutil.which("node")
+    assert node, "Node is required for dashboard behavioral tests"
+    result = subprocess.run(
+        [node, "--test", "tests/e2e/public_flow_behavior.mjs"],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_dashboard_history_contract_and_responsive_styles():
+    javascript = (APP / "app.js").read_text(encoding="utf-8")
+    assert 'from "./charts.js"' in javascript
+    assert '"/history?limit=90"' in javascript
+    for name in ("loadHistory", "renderAnalytics", "renderTeamStats", "renderScenarios", "renderAnalyticsState"):
+        assert f"function {name}" in javascript
+    for forbidden in ("innerHTML", "insertAdjacentHTML", "document.write", "eval("):
+        assert forbidden not in javascript
+    css = (APP / "app.css").read_text(encoding="utf-8")
+    for selector in (".analytics-flow", ".stat-comparison", ".analysis-split", "[hidden]", "prefers-reduced-motion", "max-width:48rem"):
+        assert selector in css
+
+
 def test_dashboard_has_a_safe_same_origin_live_data_contract():
     html = (APP / "index.html").read_text(encoding="utf-8")
     javascript = (APP / "app.js").read_text(encoding="utf-8")
