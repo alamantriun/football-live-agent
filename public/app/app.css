@@ -36,3 +36,4 @@
 .score-matrix-cell{background:rgb(223 255 84 / var(--heat,.04));color:var(--white);font-variant-numeric:tabular-nums;font-weight:750}
 .score-matrix-cell:hover{box-shadow:inset 0 0 0 2px var(--yellow);color:var(--yellow)}
 @media(max-width:48rem){.analysis-split{grid-template-columns:minmax(0,1fr)}.stat-comparison>div{grid-template-columns:minmax(0,1fr)}.analytics canvas{height:14rem}.analytics-flow{gap:2rem}.score-matrix{margin-left:calc(-1 * clamp(0rem,2vw,.5rem));margin-right:calc(-1 * clamp(0rem,2vw,.5rem))}}
+.match-button .match-time{color:var(--yellow);font-size:.78rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase}

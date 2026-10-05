@@ -204,6 +204,26 @@ test("manual refresh retries a failed summary rather than leaving an unrelated d
   assert.match(h.nodes.get("#match-detail").textContent, /Beta/);
 });
 
+test("match list shows live minute and translated match state beside each score", async () => {
+  const h = await harness();
+  const refresh = h.api.loadLive();
+  h.requests.at(-1).resolve({
+    items: [
+      { ...summary(A), minute: 63, status: "live" },
+      { ...summary(B), minute: null, status: "half time" },
+      { ...summary(A), minute: 90, status: "finished" },
+      { ...summary(B), minute: null, status: "scheduled" },
+    ],
+    data_status: "fresh",
+  });
+  await refresh;
+  const listText = h.nodes.get("#match-list").textContent;
+  assert.match(listText, /63'/);
+  assert.match(listText, /Descanso/);
+  assert.match(listText, /Finalizado/);
+  assert.match(listText, /Próximo/);
+});
+
 test("history retry works, invalid UUID never fetches, detail/list timeouts stay isolated", async () => {
   const h = await harness(); const count = h.requests.length;
   await h.api.loadMatch("not-a-uuid"); assert.equal(h.requests.length, count);

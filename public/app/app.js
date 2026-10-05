@@ -65,6 +65,17 @@ function safeLogo(url) {
   } catch { return null; }
 }
 
+function matchTimeLabel(item) {
+  const status = String(item.status || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (/(half|descanso|medio tiempo|intervalo)/.test(status)) return "Descanso";
+  if (/(finished|final|full time|ended|finalizado)/.test(status)) return "Finalizado";
+  if (/(scheduled|not started|upcoming|proximo|programado)/.test(status)) return "Próximo";
+  const minute = Number(item.minute);
+  if (Number.isFinite(minute) && item.minute !== null && item.minute !== "") return `${minute}'`;
+  if (status) return "En vivo";
+  return "Minuto no disponible";
+}
+
 function clubMark(name, logoUrl) {
   const mark = element("span", "club-mark", initials(name));
   const featured = featuredClubLogos.get(String(name || "").trim().toLowerCase());
@@ -122,7 +133,8 @@ function renderMatchList(items) {
     const button = element("button", "match-button");
     button.type = "button";
     button.setAttribute("aria-pressed", String(item.public_id === selectedId));
-    button.setAttribute("aria-label", `${item.home_name} contra ${item.away_name}`);
+    const timeLabel = matchTimeLabel(item);
+    button.setAttribute("aria-label", `${item.home_name} contra ${item.away_name}, ${timeLabel}, marcador ${item.score_home ?? "—"} a ${item.score_away ?? "—"}`);
     const copy = element("span", "match-copy");
     const clubs = element("span", "match-clubs");
     const home = element("span", "match-list-club");
@@ -130,7 +142,9 @@ function renderMatchList(items) {
     const away = element("span", "match-list-club away");
     away.append(clubMark(item.away_name, item.away_logo_url), element("span", "", item.away_name));
     clubs.append(home, element("span", "versus", "vs"), away);
-    copy.append(clubs, element("small", "", item.competition || "Competición no disponible"));
+    const matchMeta = element("span", "match-meta");
+    matchMeta.append(element("small", "match-time", timeLabel), element("small", "", item.competition || "Competición no disponible"));
+    copy.append(clubs, matchMeta);
     button.append(copy, element("span", "match-list-score", `${item.score_home ?? "—"} · ${item.score_away ?? "—"}`));
     button.addEventListener("click", () => loadMatch(item.public_id));
     list.append(button);
