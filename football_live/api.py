@@ -15,6 +15,8 @@ from fastapi.responses import JSONResponse
 from pydantic import AwareDatetime, Field, FiniteFloat
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from calidad_vivo import classify_freshness
+
 from .domain import DataStatus, MatchMinute, Probability, Score, StrictDomainModel
 from .errors import ApiError, error_body
 from .jobs import JobResult, run_collect, run_discover, run_settle, run_train
@@ -388,8 +390,18 @@ def create_app(
             raise ApiError(404, "not_found", "El partido no está disponible.")
 
         points = [HistoryPoint.model_validate(point) for point in row["points"]]
+        now = _now()
+        data_status = DataStatus.SUSPENDED
+        analytics_points = [point.model_dump() for point in points]
+        if points:
+            latest = points[-1]
+            data_status = DataStatus(classify_freshness(
+                latest.provider_observed_at, now, latest.quality.value,
+            ))
+            # Apply current age to scenarios without rewriting historical quality.
+            analytics_points[-1]["quality"] = data_status
         analytics = LiveAnalyticsResponse.model_validate(
-            build_live_analytics([point.model_dump() for point in points])
+            build_live_analytics(analytics_points)
         )
         item = MatchHistory.model_validate({
             "public_id": row["public_id"],
@@ -400,8 +412,8 @@ def create_app(
         })
         envelope = MatchHistoryEnvelope(
             request_id=_request_id(request),
-            generated_at=_now(),
-            data_status=points[-1].quality if points else DataStatus.SUSPENDED,
+            generated_at=now,
+            data_status=data_status,
             model_version=row["model_version"],
             item=item,
         )

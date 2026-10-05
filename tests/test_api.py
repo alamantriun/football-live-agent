@@ -58,7 +58,7 @@ def history_point(index: int = 0, **changes):
             "red_cards": {"home": 0, "away": 0},
             "expected_goals": {"home": 1.4, "away": None},
         },
-        "provider_observed_at": (NOW + timedelta(minutes=index)).isoformat(),
+        "provider_observed_at": (NOW - timedelta(seconds=3 - index)).isoformat(),
         "collected_at": None,
         "quality": "fresh" if index < 3 else "degraded",
         "probabilities": {"home": 52.0, "draw": 28.0, "away": 20.0},
@@ -147,7 +147,8 @@ def repository():
 
 
 @pytest.fixture
-def client(settings, repository):
+def client(settings, repository, monkeypatch):
+    monkeypatch.setattr("football_live.api._now", lambda: NOW)
     app = create_app(settings, repository, FakeProvider())
     with TestClient(app) as test_client:
         yield test_client
@@ -246,6 +247,74 @@ def test_match_history_rejects_invalid_limit_before_repository_query(
 ):
     assert client.get(f"/api/matches/{PUBLIC_ID}/history?limit={limit}").status_code == 422
     assert repository.history_calls == []
+
+
+@pytest.mark.parametrize(
+    ("age_seconds", "expected_status"),
+    [(60, "fresh"), (61, "stale"), (120, "stale"), (121, "suspended")],
+)
+def test_match_history_ages_fresh_at_collection_latest_observation(
+    client, repository, age_seconds, expected_status
+):
+    observed_at = NOW - timedelta(seconds=age_seconds)
+    points = [
+        history_point(provider_observed_at=(observed_at - timedelta(minutes=1)).isoformat()),
+        history_point(
+            1,
+            provider_observed_at=observed_at.isoformat(),
+            collected_at=NOW.isoformat(),
+            quality="fresh",
+        ),
+    ]
+    repository.history = history_row(points=points)
+
+    response = client.get(f"/api/matches/{PUBLIC_ID}/history")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data_status"] == expected_status
+    item = body["item"]
+    for actual, original in zip(item["points"], points, strict=True):
+        for key, value in original.items():
+            if key in {"provider_observed_at", "collected_at", "prediction_created_at"} and value:
+                assert datetime.fromisoformat(actual[key]) == datetime.fromisoformat(value)
+            else:
+                assert actual[key] == value
+    assert all(point["home"] is not None for point in item["analytics"]["activity"])
+    assert len(item["analytics"]["momentum"]) == 2
+    analytics = item["analytics"]
+    if expected_status == "fresh":
+        assert analytics["next_goal"] is not None
+        assert analytics["markets"] is not None
+        assert analytics["total_goals"]
+        assert analytics["scorelines"]
+    else:
+        assert analytics["next_goal"] is None
+        assert analytics["markets"] is None
+        assert analytics["total_goals"] == []
+        assert analytics["scorelines"] == []
+    assert repository.history["points"] == points
+
+
+def test_match_history_old_suspended_quality_stays_suspended(client, repository):
+    repository.history = history_row(points=[history_point(
+        provider_observed_at=(NOW - timedelta(seconds=61)).isoformat(),
+        quality="suspended",
+    )])
+
+    response = client.get(f"/api/matches/{PUBLIC_ID}/history")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data_status"] == "suspended"
+    assert body["item"]["points"][0]["quality"] == "suspended"
+    analytics = body["item"]["analytics"]
+    assert analytics["next_goal"] is None
+    assert analytics["markets"] is None
+    assert analytics["total_goals"] == []
+    assert analytics["scorelines"] == []
+    assert analytics["activity"][0]["home"] is not None
+    assert len(analytics["momentum"]) == 1
 
 
 def test_match_history_returns_404_for_unknown_public_match(client):

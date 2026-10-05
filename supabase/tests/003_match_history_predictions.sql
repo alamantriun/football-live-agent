@@ -52,7 +52,7 @@ insert into private.fixtures (
 )
 values (
   '71000000-0000-0000-0000-000000000001',
-  'history-test',
+  '365scores',
   'history-test-fixture',
   'test league',
   'history home',
@@ -199,7 +199,7 @@ select is(
     join private.live_snapshots as snapshots on snapshots.id = selected.snapshot_id
     where snapshots.minute = 95
   ),
-  'baseline-live-v1',
+  (select models.version from private.model_versions as models where models.state = 'active' limit 1),
   'active-model prediction outranks newer predictions for the exact snapshot'
 );
 select is(
