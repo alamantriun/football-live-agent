@@ -20,6 +20,7 @@ let listController = null;
 let detailController = null;
 let historyController = null;
 let selectionVersion = 0;
+let loadedSummary = null;
 let chartState = null;
 let resizeTimer = null;
 let refreshTimer = null;
@@ -182,14 +183,19 @@ async function loadMatch(id, options = {}) {
     if (response.item?.public_id !== id) throw new Error("mismatched match");
     const item = { ...response.item, data_status: response.data_status ?? response.item.data_status, model_version: response.model_version ?? response.item.model_version };
     renderDetail(item);
+    loadedSummary = { id, version, item };
     setStatus(item.data_status === "degraded" ? "Datos parciales: la lectura conserva señales ausentes." : "Lectura actualizada.", item.data_status);
     detailController = null;
     await loadHistory(id, version);
   } catch (error) {
     if (version !== selectionVersion || (error.name === "AbortError")) return;
+    // The old summary/history remain historical readings, not evidence that
+    // the selected match is still fresh after its current summary failed.
+    if (loadedSummary) renderDetail({ ...loadedSummary.item, data_status: "error" });
+    if (chartState?.item.public_id === id) renderAnalytics(chartState.item, null, chartState.modelVersion);
     detail.setAttribute("aria-busy", "false");
     setStatus("No pudimos actualizar el partido. Puedes intentarlo de nuevo.", "error");
-    renderAnalyticsState("error", "No pudimos cargar la lectura. Usa Actualizar para intentarlo de nuevo.");
+    renderAnalyticsState("error", "No pudimos actualizar la lectura: el estado actual no está confirmado y los escenarios están ocultos. Puedes reintentar; el historial disponible conserva su calidad histórica.");
   } finally { if (detailController === requestController) detailController = null; }
 }
 
@@ -238,7 +244,7 @@ function resetAnalytics() {
 }
 
 async function loadHistory(id, version = selectionVersion) {
-  if (!publicIdPattern.test(id) || selectedId !== id || version !== selectionVersion) return;
+  if (!publicIdPattern.test(id) || selectedId !== id || version !== selectionVersion || loadedSummary?.id !== id || loadedSummary.version !== version) return;
   if (historyController) historyController.abort();
   const requestController = new AbortController();
   historyController = requestController;
@@ -374,6 +380,11 @@ function refreshData() {
 function schedulePolling() { window.clearInterval(refreshTimer); refreshTimer = window.setInterval(() => { if (!document.hidden) refreshData(); }, 20000); }
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshData(); });
 window.addEventListener("resize", () => { window.clearTimeout(resizeTimer); resizeTimer = window.setTimeout(renderCharts, 150); });
-analyticsRetry.addEventListener("click", () => { if (selectedId) loadHistory(selectedId); });
+analyticsRetry.addEventListener("click", () => {
+  if (!selectedId) return;
+  if (loadedSummary?.id !== selectedId || loadedSummary.version !== selectionVersion) {
+    loadMatch(selectedId, { preserveAnalysis: true });
+  } else loadHistory(selectedId);
+});
 refresh.addEventListener("click", () => { loadLive(); if (selectedId) loadMatch(selectedId); });
 loadLive(); schedulePolling();

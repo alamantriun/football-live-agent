@@ -270,3 +270,52 @@ test("20s polling updates selected score and 1X2 before history without clearing
   refreshedHistory.resolve(payload); await h.flush();
   assert.match(h.nodes.get("#team-stats").textContent, /Local: 12.*Visitante: 3/);
 });
+
+test("failed poll summary invalidates current evidence and hides simulations but preserves history", async () => {
+  for (const failure of ["503", "timeout"]) {
+    const h = await harness(); await selected(h);
+    const stats = h.nodes.get("#team-stats").textContent;
+    const summaryText = h.nodes.get("#probability-summary").textContent;
+    h.intervals[0](); const request = h.requests.at(-1);
+    if (failure === "503") request.reject(Error("503"));
+    else [...h.timers.values()].at(-1).fn();
+    await h.flush();
+    assert.equal(h.nodes.get("#scenario-markets").hidden, true, "failed current summary cannot keep fresh simulations");
+    assert.equal(h.nodes.get("#goals-distribution").hidden, true);
+    assert.equal(h.nodes.get("#scorelines").hidden, true);
+    assert.doesNotMatch(h.nodes.get("#analytics-evidence").textContent, /Estado actual: fresh/);
+    assert.match(h.nodes.get("#analytics-evidence").textContent, /Calidad histórica: fresh/);
+    assert.equal(h.nodes.get("#team-stats").hidden, false);
+    assert.equal(h.nodes.get("#team-stats").textContent, stats);
+    assert.equal(h.nodes.get("#probability-history").hidden, false);
+    assert.equal(h.nodes.get("#probability-summary").textContent, summaryText);
+    assert.equal(h.nodes.get("#analytics-status").dataset.state, "error");
+    h.events.resize(); [...h.timers.values()].find(t => t.ms === 150).fn();
+    assert.equal(h.nodes.get("#scenario-markets").hidden, true);
+    h.nodes.get("#analytics-retry").listeners.click();
+    assert.equal(h.requests.at(-1).url, `/api/matches/${A}`, "failed polling generation needs summary retry even for the same ID");
+    h.requests.at(-1).resolve({ item: summary(A), data_status: "fresh" }); await h.flush();
+    assert.ok(h.requests.at(-1).url.endsWith("/history?limit=90"));
+    h.requests.at(-1).resolve(history()); await h.flush();
+    assert.equal(h.nodes.get("#scenario-markets").hidden, false);
+    assert.match(h.nodes.get("#analytics-evidence").textContent, /Estado actual: fresh/);
+  }
+});
+
+test("retry after B summary failure must replace A scoreboard before requesting B history", async () => {
+  const h = await harness(); await selected(h);
+  const failed = h.api.loadMatch(B); h.requests.at(-1).reject(Error("503")); await failed;
+  assert.match(h.nodes.get("#match-detail").textContent, /Alpha/);
+  h.nodes.get("#analytics-retry").listeners.click();
+  assert.equal(h.requests.at(-1).url, `/api/matches/${B}`, "retry must request B summary, not B history over A scoreboard");
+  h.requests.at(-1).reject(Error("503")); await h.flush();
+  assert.equal(h.nodes.get("#team-stats").hidden, true);
+  h.nodes.get("#analytics-retry").listeners.click();
+  assert.equal(h.requests.at(-1).url, `/api/matches/${B}`);
+  h.requests.at(-1).resolve({ item: summary(B), data_status: "fresh" }); await h.flush();
+  assert.match(h.nodes.get("#match-detail").textContent, /Beta/);
+  assert.doesNotMatch(h.nodes.get("#match-detail").textContent, /Alpha/);
+  assert.equal(h.requests.at(-1).url, `/api/matches/${B}/history?limit=90`);
+  h.requests.at(-1).resolve(history(B)); await h.flush();
+  assert.equal(h.nodes.get("#team-stats").hidden, false);
+});
