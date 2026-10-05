@@ -26,6 +26,9 @@ let historyController = null;
 let selectionVersion = 0;
 let loadedSummary = null;
 let chartState = null;
+let detailSnapshot = null;
+let statsSnapshot = null;
+let matrixSnapshot = null;
 let resizeTimer = null;
 let refreshTimer = null;
 const analyticsArea = document.querySelector(".analytics");
@@ -178,8 +181,8 @@ function renderMatchList(items) {
   });
 }
 
-function probabilityCard(label, value) {
-  const row = element("div", "probability");
+function probabilityCard(label, value, changed = false) {
+  const row = element("div", changed ? "probability value-changed" : "probability");
   const available = Number.isFinite(value);
   row.append(element("span", "", label), element("strong", "", available ? `${Number(value).toFixed(2)}%` : "Dato no disponible"));
   if (available) { const bar = element("i"); bar.style.setProperty("--percent", `${Math.max(0, Math.min(100, Number(value)))}%`); row.append(bar); }
@@ -189,6 +192,20 @@ function probabilityCard(label, value) {
 function renderDetail(item) {
   detail.setAttribute("aria-busy", "false");
   const visualState = matchVisualState(item);
+  const nextDetailSnapshot = {
+    id: item.public_id,
+    scoreHome: item.score_home,
+    scoreAway: item.score_away,
+    minute: item.minute,
+    probabilities: { ...(item.probabilities || {}) },
+  };
+  const previousDetail = detailSnapshot?.id === nextDetailSnapshot.id ? detailSnapshot : null;
+  const detailChanged = {
+    score: Boolean(previousDetail && (previousDetail.scoreHome !== nextDetailSnapshot.scoreHome || previousDetail.scoreAway !== nextDetailSnapshot.scoreAway)),
+    minute: Boolean(previousDetail && previousDetail.minute !== nextDetailSnapshot.minute),
+    probabilities: Object.fromEntries(["home", "draw", "away"].map(key => [key, Boolean(previousDetail && previousDetail.probabilities[key] !== nextDetailSnapshot.probabilities[key])])),
+  };
+  detailSnapshot = nextDetailSnapshot;
   detail.dataset.liveState = visualState;
   analyticsArea.dataset.liveState = visualState;
   detail.replaceChildren();
@@ -196,13 +213,14 @@ function renderDetail(item) {
   top.append(element("span", "", item.competition || "Lectura en vivo"), liveBadge(item), element("span", `quality ${item.data_status}`, item.data_status === "degraded" ? "Datos parciales" : `Datos ${item.data_status}`));
   const scoreline = element("div", "scoreline");
   const home = element("div", "club"); home.append(clubMark(item.home_name, item.home_logo_url), element("span", "", item.home_name));
-  const score = element("div", `score score-${visualState}`, `${item.score_home ?? "—"}—${item.score_away ?? "—"}`); score.append(element("small", "", item.minute == null ? "Minuto no disponible" : `${item.minute}'`));
+  const scoreClass = detailChanged.score || detailChanged.minute ? `score score-${visualState} value-changed` : `score score-${visualState}`;
+  const score = element("div", scoreClass, `${item.score_home ?? "—"}—${item.score_away ?? "—"}`); score.append(element("small", "", item.minute == null ? "Minuto no disponible" : `${item.minute}'`));
   const away = element("div", "club away"); away.append(element("span", "", item.away_name), clubMark(item.away_name, item.away_logo_url));
   scoreline.append(home, score, away);
   const grid = element("div", "detail-grid");
   const probabilities = element("section", "surface"); probabilities.append(element("h3", "", "Probabilidades 1X2"));
   const values = item.probabilities || {};
-  probabilities.append(probabilityCard(item.home_name, values.home), probabilityCard("Empate", values.draw), probabilityCard(item.away_name, values.away));
+  probabilities.append(probabilityCard(item.home_name, values.home, detailChanged.probabilities.home), probabilityCard("Empate", values.draw, detailChanged.probabilities.draw), probabilityCard(item.away_name, values.away, detailChanged.probabilities.away));
   const context = element("section", "surface"); context.append(element("h3", "", "Contexto de la lectura"));
   const warnings = Array.isArray(item.explanation?.warnings) ? item.explanation.warnings : [];
   context.append(element("p", "signal-summary", warnings[0] || "Dato no disponible: la explicación aún no fue publicada."));
@@ -222,7 +240,12 @@ async function loadMatch(id, options = {}) {
   detailController = requestController;
   const version = ++selectionVersion;
   selectedId = id;
-  if (!preserveAnalysis) resetAnalytics();
+  if (!preserveAnalysis) {
+    detailSnapshot = null;
+    statsSnapshot = null;
+    matrixSnapshot = null;
+    resetAnalytics();
+  }
   renderAnalyticsState("loading", "Cargando historial del partido…");
   renderMatchList(liveItems);
   detail.setAttribute("aria-busy", "true"); setStatus("Actualizando la lectura del partido…", "loading");
@@ -320,11 +343,16 @@ const statPairs = [
   ["red_cards", "Tarjetas rojas", ""], ["expected_goals", "Goles esperados del proveedor", ""],
 ];
 
-function renderTeamStats(point) {
+function renderTeamStats(point, matchId) {
   teamStats.replaceChildren(); teamStats.hidden = false; teamStats.parentElement.hidden = false;
+  const nextStats = statPairs.map(([key]) => ({ key, home: point?.stats?.[key]?.home, away: point?.stats?.[key]?.away }));
+  const previousStats = statsSnapshot?.id === matchId ? statsSnapshot.values : null;
+  statsSnapshot = { id: matchId, values: nextStats };
   for (const [key, label, unit] of statPairs) {
     const pair = point?.stats?.[key] || {};
-    const row = element("div"); row.append(element("dt", "", label));
+    const previous = previousStats?.find(value => value.key === key);
+    const changed = Boolean(previous && (previous.home !== pair.home || previous.away !== pair.away));
+    const row = element("div", changed ? "stat-changed" : ""); row.append(element("dt", "", label));
     const values = element("dd", "stat-pair");
     const total = Number.isFinite(pair.home) && Number.isFinite(pair.away) ? pair.home + pair.away : null;
     for (const side of ["home", "away"]) {
@@ -354,13 +382,15 @@ function percentageRow(target, label, value, ordered = false) {
   }
 }
 
-function renderScoreMatrix(rows) {
+function renderScoreMatrix(rows, matchId) {
   scoreMatrix.replaceChildren();
   scoreMatrix.hidden = !rows.length;
   scoreMatrix.parentElement.hidden = !rows.length;
   if (!rows.length) return;
   const labels = ["0", "1", "2", "3", "4", "5", "6+"];
   const values = new Map(rows.map((row) => [`${row.home}:${row.away}`, row.probability]));
+  const previousValues = matrixSnapshot?.id === matchId ? matrixSnapshot.values : null;
+  matrixSnapshot = { id: matchId, values };
   const header = element("div", "score-matrix-row score-matrix-head");
   header.setAttribute("role", "row");
   const corner = element("span", "score-matrix-axis", "Local ↓ · Visitante →");
@@ -375,7 +405,9 @@ function renderScoreMatrix(rows) {
     for (const away of labels) {
       const probability = values.get(`${home}:${away}`);
       const available = Number.isFinite(probability);
-      const cell = element("span", "score-matrix-cell", available ? `${probability}%` : "—");
+      const key = `${home}:${away}`;
+      const changed = Boolean(previousValues?.has(key) && previousValues.get(key) !== probability);
+      const cell = element("span", changed ? "score-matrix-cell matrix-cell-changed" : "score-matrix-cell", available ? `${probability}%` : "—");
       cell.setAttribute("role", "cell");
       cell.setAttribute("aria-label", `Local ${home}, visitante ${away}: ${available ? `${probability}%` : "dato no disponible"}`);
       if (available) cell.style.setProperty("--heat", String(Math.max(0.06, Math.min(0.9, probability / 35))));
@@ -385,7 +417,7 @@ function renderScoreMatrix(rows) {
   }
 }
 
-function renderScenarios(analytics, dataStatus, modelVersion) {
+function renderScenarios(analytics, dataStatus, modelVersion, matchId) {
   const allowed = ["fresh", "degraded"].includes(dataStatus);
   for (const node of [nextGoal, marketProbabilities, goalsDistribution, scorelines, scoreMatrix]) node.replaceChildren();
   const nextAvailable = allowed && analytics.next_goal != null;
@@ -403,7 +435,7 @@ function renderScenarios(analytics, dataStatus, modelVersion) {
   goalsDistribution.parentElement.parentElement.hidden = !totals.length && !scores.length;
   for (const row of totals) percentageRow(goalsDistribution, row.label, row.probability);
   for (const row of scores) percentageRow(scorelines, `${row.home}—${row.away}`, row.probability, true);
-  renderScoreMatrix(matrix);
+  renderScoreMatrix(matrix, matchId);
   if (!allowed) return `Datos ${dataStatus ?? "no disponibles"}: los escenarios están ocultos por la antigüedad o suspensión de la lectura.`;
   if (!nextAvailable || !marketsAvailable || !totals.length || !scores.length || !matrix.length) return "Dato no disponible: faltan tasas ajustadas válidas para algunos escenarios del modelo.";
   return "Escenarios experimentales del modelo; no representan evidencia de precisión validada.";
@@ -444,8 +476,8 @@ function renderAnalytics(item, dataStatus, modelVersion) {
   analyticsArea.dataset.liveState = historyState === "unknown" ? (detail.dataset.liveState || historyState) : historyState;
   chartState = { item: { ...item, points }, dataStatus, modelVersion };
   for (const canvas of [probabilityCanvas, activityCanvas]) { canvas.hidden = false; canvas.parentElement.hidden = false; }
-  renderTeamStats(points.at(-1));
-  const scenarioMessage = renderScenarios(analytics, dataStatus, modelVersion);
+  renderTeamStats(points.at(-1), item.public_id);
+  const scenarioMessage = renderScenarios(analytics, dataStatus, modelVersion, item.public_id);
   evidence.hidden = false;
   const coverage = analytics.coverage;
   evidence.replaceChildren(element("p", "", `Cobertura: ${coverage && Number.isFinite(coverage.percent) ? `${coverage.available}/${coverage.total} (${coverage.percent}%)` : "Dato no disponible"} · Estado actual: ${dataStatus ?? "Dato no disponible"} · Calidad histórica: ${points.at(-1)?.quality ?? "Dato no disponible"} · Modelo: ${modelVersion ?? "Dato no disponible"} · Observado: ${points.at(-1)?.provider_observed_at ?? "Dato no disponible"}`));

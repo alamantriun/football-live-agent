@@ -61,4 +61,13 @@
 @keyframes live-score-breathe{0%,100%{text-shadow:0 0 0 rgb(223 255 84 / 0);transform:scale(1)}50%{text-shadow:0 0 1.2rem rgb(223 255 84 / .28);transform:scale(1.015)}}
 @keyframes matrix-live-pulse{0%,100%{filter:saturate(1);box-shadow:inset 0 0 0 0 rgb(223 255 84 / 0)}50%{filter:saturate(1.2);box-shadow:inset 0 0 0 1px rgb(223 255 84 / .25)}}
 @keyframes live-spin{to{transform:rotate(360deg)}}
-@media(prefers-reduced-motion:reduce){.live-badge-live .live-dot,.match-button.match-live .match-list-score,.score-live,.analytics[data-live-state=live] .score-matrix-cell,#refresh[data-refreshing=true]::after{animation:none}}
+.probability i::after,.stat-comparison .stat-bar,.analysis-rows .analysis-bar{transition:filter .6s ease,width .6s ease}
+.probability.value-changed strong,.stat-changed dd{animation:value-change .9s ease-out 1}
+.probability.value-changed i::after,.stat-changed .stat-bar{animation:changed-bar .9s ease-out 1}
+.score.value-changed:not(.score-live){animation:value-change .9s ease-out 1}
+.score.score-live.value-changed{animation:live-score-breathe 2.4s ease-in-out infinite,value-change .9s ease-out 1}
+.analytics[data-live-state=live] .score-matrix-cell.matrix-cell-changed{animation:matrix-live-pulse 3.2s ease-in-out infinite,matrix-value-change .9s ease-out 1}
+@keyframes value-change{0%{color:var(--white);text-shadow:0 0 0 rgb(223 255 84 / 0);transform:scale(1)}35%{color:var(--lime);text-shadow:0 0 .9rem rgb(223 255 84 / .5);transform:scale(1.06)}100%{color:var(--white);text-shadow:0 0 0 rgb(223 255 84 / 0);transform:scale(1)}}
+@keyframes changed-bar{0%{filter:brightness(1)}35%{filter:brightness(1.8)}100%{filter:brightness(1)}}
+@keyframes matrix-value-change{0%{color:var(--white);box-shadow:inset 0 0 0 0 rgb(255 217 77 / 0)}35%{color:var(--yellow);box-shadow:inset 0 0 0 2px rgb(255 217 77 / .85)}100%{color:var(--white);box-shadow:inset 0 0 0 0 rgb(255 217 77 / 0)}}
+@media(prefers-reduced-motion:reduce){.live-badge-live .live-dot,.match-button.match-live .match-list-score,.score-live,.analytics[data-live-state=live] .score-matrix-cell,#refresh[data-refreshing=true]::after,.value-changed,.stat-changed .stat-bar,.matrix-cell-changed{animation:none}}

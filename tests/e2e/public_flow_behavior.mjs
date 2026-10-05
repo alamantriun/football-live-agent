@@ -305,12 +305,18 @@ test("20s polling updates selected score and 1X2 before history without clearing
   detail.resolve({ item: { ...summary(A), score_home: 2, score_away: 1, minute: 65, probabilities: { home: 80.125, draw: 10, away: 9.875 } }, data_status: "fresh", model_version: "poll-model" });
   await h.flush();
   assert.match(h.nodes.get("#match-detail").textContent, /2—1.*65'.*Alpha 80\.13%.*Empate 10\.00%.*Away 9\.88%/);
+  assert.match(h.nodes.get("#match-detail").children[1].children[1].className, /value-changed/);
+  assert.match(h.nodes.get("#match-detail").children[2].children[0].children[1].className, /value-changed/);
   const refreshedHistory = h.requests.at(-1);
   assert.ok(refreshedHistory.url.endsWith("/history?limit=90"));
   assert.equal(h.nodes.get("#team-stats").hidden, false);
-  const payload = history(); payload.item.points.at(-1).stats.shots = { home: 12, away: 3 };
+  const payload = history();
+  payload.item.points.at(-1).stats.shots = { home: 12, away: 3 };
+  payload.item.analytics.score_matrix = payload.item.analytics.score_matrix.map(row => row.home === "1" && row.away === "0" ? { ...row, probability: 26.125 } : row);
   refreshedHistory.resolve(payload); await h.flush();
   assert.match(h.nodes.get("#team-stats").textContent, /Local: 12.*Visitante: 3/);
+  assert.match(h.nodes.get("#team-stats").children[1].className, /stat-changed/);
+  assert.match(h.nodes.get("#score-matrix").children[2].children[1].className, /matrix-cell-changed/);
 });
 
 test("failed poll summary invalidates current evidence and hides simulations but preserves history", async () => {
