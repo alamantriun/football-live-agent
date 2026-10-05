@@ -147,6 +147,13 @@ test("null differs from zero, exact scenarios and historical gaps are rendered w
   assert.match(h.nodes.get("#scorelines").textContent, /2.*1.*25\.125%.*0.*0.*0%/);
   assert.equal(h.nodes.get("#score-matrix").hidden, false);
   assert.match(h.nodes.get("#score-matrix").textContent, /Local.*Visitante.*25\.125%.*6\+/);
+  const matrixTeams = h.nodes.get("#matrix-teams");
+  assert.ok(matrixTeams, "matrix team reference is rendered before the score matrix");
+  assert.equal(matrixTeams.hidden, false);
+  assert.match(matrixTeams.textContent, /LOCAL.*Alpha.*VISITANTE.*Away/);
+  assert.match(matrixTeams.attributes["aria-label"], /Local: Alpha.*Visitante: Away/);
+  const matrixSection = h.nodes.get("#score-matrix").parentElement;
+  assert.equal(matrixSection.children[matrixSection.children.indexOf(matrixTeams) + 1], h.nodes.get("#score-matrix"));
   assert.equal(h.nodes.get("#score-matrix").parentElement.parentElement.children[0], h.nodes.get("#score-matrix").parentElement, "the score matrix leads the live analysis");
   assert.match(h.nodes.get("#analytics-evidence").textContent, /fresh.*fresh.*envelope-v5.*2026-10-05/);
   assert.match(h.nodes.get("#probability-summary").textContent, /huecos|ausentes/i);

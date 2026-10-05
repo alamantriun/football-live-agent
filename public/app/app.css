@@ -49,6 +49,8 @@
 .analytics-retry{background:transparent;border:1px solid var(--lime);color:var(--lime);cursor:pointer;font:inherit;margin:0 0 1.5rem;min-height:44px;min-width:44px;padding:.65rem 1rem}
 .analytics-retry:hover{background:var(--lime);color:var(--ink)}
 .score-matrix{border:1px solid var(--line);font-size:clamp(.72rem,1.4vw,.9rem);margin-top:1.2rem;max-width:100%;overflow-x:auto;padding:.35rem}
+.matrix-teams{align-items:center;background:rgb(255 255 255 / .05);display:grid;gap:.8rem;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);margin-top:1.2rem;padding:.85rem 1rem}
+.matrix-team{align-items:center;display:flex;gap:.55rem;min-width:0}.matrix-team.away{flex-direction:row-reverse;text-align:right}.matrix-team .club-mark{flex:0 0 auto;height:2.25rem;width:2.25rem}.matrix-team strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.matrix-team-role{color:var(--yellow);font-size:.68rem;font-weight:850;letter-spacing:.07em}.matrix-team-versus{color:var(--muted);font-size:.72rem;font-weight:850;text-transform:uppercase}
 .score-matrix-row{display:grid;grid-template-columns:minmax(7rem,1.5fr) repeat(7,minmax(3.5rem,1fr));min-width:36rem}
 .score-matrix-row>span{align-items:center;border-bottom:1px solid var(--line);border-right:1px solid var(--line);display:flex;justify-content:center;min-height:3.2rem;padding:.35rem;text-align:center}
 .score-matrix-row>span:last-child{border-right:0}
@@ -56,7 +58,7 @@
 .score-matrix-head,.score-matrix-axis{color:var(--muted);font-weight:800}
 .score-matrix-cell{background:rgb(223 255 84 / var(--heat,.04));color:var(--white);font-variant-numeric:tabular-nums;font-weight:750}
 .score-matrix-cell:hover{box-shadow:inset 0 0 0 2px var(--yellow);color:var(--yellow)}
-@media(max-width:48rem){.analysis-split{grid-template-columns:minmax(0,1fr)}.stat-comparison>div{grid-template-columns:minmax(0,1fr)}.analytics canvas{height:14rem}.analytics-flow{gap:2rem}.score-matrix{margin-left:calc(-1 * clamp(0rem,2vw,.5rem));margin-right:calc(-1 * clamp(0rem,2vw,.5rem))}.analytics-heading-row{align-items:flex-start;flex-direction:column}.refresh-countdown{width:100%}}
+@media(max-width:48rem){.analysis-split{grid-template-columns:minmax(0,1fr)}.stat-comparison>div{grid-template-columns:minmax(0,1fr)}.analytics canvas{height:14rem}.analytics-flow{gap:2rem}.score-matrix{margin-left:calc(-1 * clamp(0rem,2vw,.5rem));margin-right:calc(-1 * clamp(0rem,2vw,.5rem))}.analytics-heading-row{align-items:flex-start;flex-direction:column}.refresh-countdown{width:100%}.matrix-teams{margin-top:1rem;padding:.75rem}.matrix-team{align-items:flex-start;flex-direction:column;gap:.25rem}.matrix-team.away{align-items:flex-end;flex-direction:column}.matrix-team .club-mark{display:none}}
 .match-button .match-time{color:var(--yellow);font-size:.78rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase}
 .workspace{display:block}
 .match-list{grid-template-columns:repeat(3,minmax(0,1fr))}

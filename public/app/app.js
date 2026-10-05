@@ -49,6 +49,7 @@ const marketProbabilities = document.querySelector("#market-probabilities");
 const goalsDistribution = document.querySelector("#goals-distribution");
 const scorelines = document.querySelector("#scorelines");
 const scoreMatrix = document.querySelector("#score-matrix");
+const matrixTeams = document.querySelector("#matrix-teams");
 const evidence = document.querySelector("#analytics-evidence");
 const refreshCountdown = document.querySelector("#refresh-countdown");
 const refreshCountdownRing = document.querySelector("#refresh-countdown-ring");
@@ -378,6 +379,7 @@ function resetAnalytics() {
   goalsDistribution.hidden = true; scorelines.hidden = true;
   goalsDistribution.parentElement.parentElement.hidden = true;
   scoreMatrix.hidden = true; scoreMatrix.parentElement.hidden = true;
+  matrixTeams.replaceChildren(); matrixTeams.hidden = true;
   evidence.replaceChildren(); evidence.hidden = true;
 }
 
@@ -470,6 +472,19 @@ function renderBtts(yes, no, available) {
   bttsVisual.setAttribute("aria-label", `Ambos equipos marcan: sí ${yesLabel}, no ${noLabel}.`);
 }
 
+function renderMatrixTeams(item, available) {
+  matrixTeams.replaceChildren();
+  matrixTeams.hidden = !available;
+  if (!available) return;
+  matrixTeams.setAttribute("aria-label", `Local: ${item.home_name}. Visitante: ${item.away_name}.`);
+  const team = (side, name, logoUrl) => {
+    const node = element("div", `matrix-team ${side}`);
+    node.append(element("span", "matrix-team-role", side === "home" ? "LOCAL" : "VISITANTE"), clubMark(name, logoUrl), element("strong", "", name));
+    return node;
+  };
+  matrixTeams.append(team("home", item.home_name, item.home_logo_url), element("span", "matrix-team-versus", "vs"), team("away", item.away_name, item.away_logo_url));
+}
+
 function renderScoreMatrix(rows, matchId) {
   clearVisualDecimals("matrix");
   scoreMatrix.replaceChildren();
@@ -507,7 +522,7 @@ function renderScoreMatrix(rows, matchId) {
   }
 }
 
-function renderScenarios(analytics, dataStatus, modelVersion, matchId) {
+function renderScenarios(analytics, dataStatus, modelVersion, matchId, item) {
   const allowed = ["fresh", "degraded"].includes(dataStatus);
   clearVisualDecimals("scenario");
   for (const node of [nextGoal, marketProbabilities, goalsDistribution, scorelines, scoreMatrix]) node.replaceChildren();
@@ -528,6 +543,7 @@ function renderScenarios(analytics, dataStatus, modelVersion, matchId) {
   goalsDistribution.parentElement.parentElement.hidden = !totals.length && !scores.length;
   for (const row of totals) percentageRow(goalsDistribution, row.label, row.probability);
   for (const row of scores) percentageRow(scorelines, `${row.home}—${row.away}`, row.probability, true);
+  renderMatrixTeams(item, matrix.length > 0);
   renderScoreMatrix(matrix, matchId);
   if (!allowed) return `Datos ${dataStatus ?? "no disponibles"}: los escenarios están ocultos por la antigüedad o suspensión de la lectura.`;
   if (!nextAvailable || !marketsAvailable || !totals.length || !scores.length || !matrix.length) return "Dato no disponible: faltan tasas ajustadas válidas para algunos escenarios del modelo.";
@@ -570,7 +586,7 @@ function renderAnalytics(item, dataStatus, modelVersion) {
   chartState = { item: { ...item, points }, dataStatus, modelVersion };
   for (const canvas of [probabilityCanvas, activityCanvas]) { canvas.hidden = false; canvas.parentElement.hidden = false; }
   renderTeamStats(points.at(-1), item.public_id);
-  const scenarioMessage = renderScenarios(analytics, dataStatus, modelVersion, item.public_id);
+  const scenarioMessage = renderScenarios(analytics, dataStatus, modelVersion, item.public_id, item);
   evidence.hidden = false;
   const coverage = analytics.coverage;
   evidence.replaceChildren(element("p", "", `Cobertura: ${coverage && Number.isFinite(coverage.percent) ? `${coverage.available}/${coverage.total} (${coverage.percent}%)` : "Dato no disponible"} · Estado actual: ${dataStatus ?? "Dato no disponible"} · Calidad histórica: ${points.at(-1)?.quality ?? "Dato no disponible"} · Modelo: ${modelVersion ?? "Dato no disponible"} · Observado: ${points.at(-1)?.provider_observed_at ?? "Dato no disponible"}`));
