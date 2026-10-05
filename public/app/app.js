@@ -6,12 +6,12 @@ const status = document.querySelector("#data-status");
 const refresh = document.querySelector("#refresh");
 const favoritesKey = "football-live-favorites";
 const states = ["loading", "empty", "fresh", "degraded", "stale", "suspended", "error"];
-const allowedLogoHosts = new Set(["imagecache.365scores.com", "img.365scores.com", "cdn.freebiesupply.com"]);
+const allowedLogoHosts = new Set(["imagecache.365scores.com", "img.365scores.com"]);
 const featuredClubLogos = new Map([
-  ["arsenal", "https://cdn.freebiesupply.com/logos/large/2x/arsenal-2-logo-png-transparent.png"],
-  ["arsenal fc", "https://cdn.freebiesupply.com/logos/large/2x/arsenal-2-logo-png-transparent.png"],
-  ["chelsea", "https://cdn.freebiesupply.com/logos/large/2x/chelsea-fc-2-logo-png-transparent.png"],
-  ["chelsea fc", "https://cdn.freebiesupply.com/logos/large/2x/chelsea-fc-2-logo-png-transparent.png"],
+  ["arsenal", "https://imagecache.365scores.com/image/upload/f_png,w_160,h_160,c_limit,q_auto:eco,dpr_2,d_Competitors:default1.png/v20/Competitors/104"],
+  ["arsenal fc", "https://imagecache.365scores.com/image/upload/f_png,w_160,h_160,c_limit,q_auto:eco,dpr_2,d_Competitors:default1.png/v20/Competitors/104"],
+  ["chelsea", "https://imagecache.365scores.com/image/upload/f_png,w_160,h_160,c_limit,q_auto:eco,dpr_2,d_Competitors:default1.png/v7/Competitors/106"],
+  ["chelsea fc", "https://imagecache.365scores.com/image/upload/f_png,w_160,h_160,c_limit,q_auto:eco,dpr_2,d_Competitors:default1.png/v7/Competitors/106"],
 ]);
 const publicIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 let liveItems = [];
@@ -35,6 +35,7 @@ const nextGoal = document.querySelector("#next-goal");
 const marketProbabilities = document.querySelector("#market-probabilities");
 const goalsDistribution = document.querySelector("#goals-distribution");
 const scorelines = document.querySelector("#scorelines");
+const scoreMatrix = document.querySelector("#score-matrix");
 const evidence = document.querySelector("#analytics-evidence");
 
 function setStatus(message, state) {
@@ -237,9 +238,10 @@ function resetAnalytics() {
   }
   teamStats.replaceChildren(); teamStats.hidden = true; teamStats.parentElement.hidden = true;
   scenarioMarkets.hidden = true;
-  for (const node of [nextGoal, marketProbabilities, goalsDistribution, scorelines]) node.replaceChildren();
+  for (const node of [nextGoal, marketProbabilities, goalsDistribution, scorelines, scoreMatrix]) node.replaceChildren();
   goalsDistribution.hidden = true; scorelines.hidden = true;
   goalsDistribution.parentElement.parentElement.hidden = true;
+  scoreMatrix.hidden = true; scoreMatrix.parentElement.hidden = true;
   evidence.replaceChildren(); evidence.hidden = true;
 }
 
@@ -303,9 +305,40 @@ function percentageRow(target, label, value, ordered = false) {
   }
 }
 
+function renderScoreMatrix(rows) {
+  scoreMatrix.replaceChildren();
+  scoreMatrix.hidden = !rows.length;
+  scoreMatrix.parentElement.hidden = !rows.length;
+  if (!rows.length) return;
+  const labels = ["0", "1", "2", "3", "4", "5", "6+"];
+  const values = new Map(rows.map((row) => [`${row.home}:${row.away}`, row.probability]));
+  const header = element("div", "score-matrix-row score-matrix-head");
+  header.setAttribute("role", "row");
+  const corner = element("span", "score-matrix-axis", "Local ↓ · Visitante →");
+  corner.setAttribute("role", "columnheader"); header.append(corner);
+  for (const away of labels) {
+    const label = element("span", "", away); label.setAttribute("role", "columnheader"); header.append(label);
+  }
+  scoreMatrix.append(header);
+  for (const home of labels) {
+    const row = element("div", "score-matrix-row"); row.setAttribute("role", "row");
+    const rowLabel = element("span", "score-matrix-axis", home); rowLabel.setAttribute("role", "rowheader"); row.append(rowLabel);
+    for (const away of labels) {
+      const probability = values.get(`${home}:${away}`);
+      const available = Number.isFinite(probability);
+      const cell = element("span", "score-matrix-cell", available ? `${probability}%` : "—");
+      cell.setAttribute("role", "cell");
+      cell.setAttribute("aria-label", `Local ${home}, visitante ${away}: ${available ? `${probability}%` : "dato no disponible"}`);
+      if (available) cell.style.setProperty("--heat", String(Math.max(0.06, Math.min(0.9, probability / 35))));
+      row.append(cell);
+    }
+    scoreMatrix.append(row);
+  }
+}
+
 function renderScenarios(analytics, dataStatus, modelVersion) {
   const allowed = ["fresh", "degraded"].includes(dataStatus);
-  for (const node of [nextGoal, marketProbabilities, goalsDistribution, scorelines]) node.replaceChildren();
+  for (const node of [nextGoal, marketProbabilities, goalsDistribution, scorelines, scoreMatrix]) node.replaceChildren();
   const nextAvailable = allowed && analytics.next_goal != null;
   const marketsAvailable = allowed && analytics.markets != null;
   scenarioMarkets.hidden = !nextAvailable && !marketsAvailable;
@@ -315,13 +348,15 @@ function renderScenarios(analytics, dataStatus, modelVersion) {
   if (marketsAvailable) for (const [key, label] of [["over_2_5", "Más de 2,5 goles"], ["under_2_5", "Menos de 2,5 goles"], ["btts_yes", "Ambos marcan: sí"], ["btts_no", "Ambos marcan: no"]]) percentageRow(marketProbabilities, label, analytics.markets[key]);
   const totals = allowed && Array.isArray(analytics.total_goals) ? analytics.total_goals : [];
   const scores = allowed && Array.isArray(analytics.scorelines) ? analytics.scorelines : [];
+  const matrix = allowed && Array.isArray(analytics.score_matrix) ? analytics.score_matrix : [];
   goalsDistribution.hidden = !totals.length; goalsDistribution.parentElement.hidden = !totals.length;
   scorelines.hidden = !scores.length; scorelines.parentElement.hidden = !scores.length;
   goalsDistribution.parentElement.parentElement.hidden = !totals.length && !scores.length;
   for (const row of totals) percentageRow(goalsDistribution, row.label, row.probability);
   for (const row of scores) percentageRow(scorelines, `${row.home}—${row.away}`, row.probability, true);
+  renderScoreMatrix(matrix);
   if (!allowed) return `Datos ${dataStatus ?? "no disponibles"}: los escenarios están ocultos por la antigüedad o suspensión de la lectura.`;
-  if (!nextAvailable || !marketsAvailable || !totals.length || !scores.length) return "Dato no disponible: faltan tasas ajustadas válidas para algunos escenarios del modelo.";
+  if (!nextAvailable || !marketsAvailable || !totals.length || !scores.length || !matrix.length) return "Dato no disponible: faltan tasas ajustadas válidas para algunos escenarios del modelo.";
   return "Escenarios experimentales del modelo; no representan evidencia de precisión validada.";
 }
 

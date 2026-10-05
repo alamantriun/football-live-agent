@@ -58,7 +58,8 @@ def test_dashboard_declares_all_live_data_states_and_safe_logo_fallback():
     assert "loading" in javascript
     assert "localStorage" in javascript
     assert "featuredClubLogos" in javascript
-    assert "cdn.freebiesupply.com" in javascript
+    assert "imagecache.365scores.com" in javascript
+    assert "freebiesupply" not in javascript.lower()
     match_list = javascript.split("function renderMatchList", 1)[1].split("function probabilityCard", 1)[0]
     assert "clubMark(item.home_name, item.home_logo_url)" in match_list
     assert "clubMark(item.away_name, item.away_logo_url)" in match_list
@@ -82,10 +83,11 @@ def test_dashboard_includes_accessible_live_analysis_surfaces():
     for element_id in (
         "analytics-status", "probability-history", "team-stats",
         "activity-chart", "scenario-markets", "goals-distribution",
-        "scorelines", "analytics-evidence",
+        "scorelines", "score-matrix", "analytics-evidence",
     ):
         assert element_id in elements
         assert "hidden" in elements[element_id][1]
+    assert "score-matrix-summary" in elements
     assert elements["analytics-status"][1]["role"] == "status"
     for element_id in ("probability-history", "activity-chart"):
         tag, attrs = elements[element_id]
@@ -95,6 +97,9 @@ def test_dashboard_includes_accessible_live_analysis_surfaces():
         assert attrs["aria-describedby"] in elements
     assert elements["team-stats"][0] == "dl"
     assert elements["scorelines"][0] == "ol"
+    assert elements["score-matrix"][0] == "div"
+    assert elements["score-matrix"][1]["role"] == "table"
+    assert elements["score-matrix"][1]["aria-describedby"] == "score-matrix-summary"
     assert 'type="module" src="/app/app.js"' in html
     for export in ("drawLineChart", "drawBarChart", "clearChart"):
         assert f"export function {export}" in javascript

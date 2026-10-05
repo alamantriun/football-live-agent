@@ -39,6 +39,11 @@ const history = (id = A, state = "fresh", points = [point(1), point(2, null), po
     markets: { over_2_5: 30, under_2_5: 70, btts_yes: 10, btts_no: 90 },
     total_goals: [{ label: "0", probability: 0 }, { label: "7+", probability: 25.125 }],
     scorelines: [{ home: 2, away: 1, probability: 25.125 }, { home: 0, away: 0, probability: 0 }],
+    score_matrix: [
+      { home: "0", away: "0", probability: 0 },
+      { home: "1", away: "0", probability: 25.125 },
+      { home: "6+", away: "6+", probability: 0.5 },
+    ],
     coverage: { available: 2, total: 14, percent: 14.2857 },
   } },
 });
@@ -140,6 +145,8 @@ test("null differs from zero, exact scenarios and historical gaps are rendered w
   assert.match(h.nodes.get("#next-goal").textContent, /25\.125%/);
   assert.match(h.nodes.get("#next-goal").textContent, /0%/);
   assert.match(h.nodes.get("#scorelines").textContent, /2.*1.*25\.125%.*0.*0.*0%/);
+  assert.equal(h.nodes.get("#score-matrix").hidden, false);
+  assert.match(h.nodes.get("#score-matrix").textContent, /Local.*Visitante.*25\.125%.*6\+/);
   assert.match(h.nodes.get("#analytics-evidence").textContent, /fresh.*fresh.*envelope-v5.*2026-10-05/);
   assert.match(h.nodes.get("#probability-summary").textContent, /huecos|ausentes/i);
   assert.match(h.nodes.get("#activity-summary").textContent, /Índice experimental/);
@@ -153,6 +160,7 @@ test("stale/suspended envelopes hide scenarios even when points remain fresh", a
     const h = await harness(); await selected(h, history(A, state));
     assert.equal(h.nodes.get("#scenario-markets").hidden, true);
     assert.equal(h.nodes.get("#goals-distribution").hidden, true);
+    assert.equal(h.nodes.get("#score-matrix").hidden, true);
     assert.equal(h.nodes.get("#scorelines").hidden, true);
     assert.match(h.nodes.get("#analytics-evidence").textContent, new RegExp(state));
     assert.match(h.nodes.get("#analytics-status").textContent, /escenarios/i);

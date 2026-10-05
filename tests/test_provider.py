@@ -164,7 +164,11 @@ def test_partial_snapshot_preserves_missing_stats_and_real_zero():
 
 
 def test_live_list_uses_canonical_fields_and_internal_live_status():
-    fixtures = ProviderAdapter().parse_live_list(load_fixture("live_list.json"))
+    payload = load_fixture("live_list.json")
+    payload["games"][0]["homeCompetitor"].update({"id": 11, "imageVersion": 7})
+    payload["games"][0]["awayCompetitor"].update({"id": 22, "imageVersion": 3})
+
+    fixtures = ProviderAdapter().parse_live_list(payload)
 
     assert len(fixtures) == 1
     assert fixtures[0].provider_fixture_id == "123456789"
@@ -172,6 +176,12 @@ def test_live_list_uses_canonical_fields_and_internal_live_status():
     assert fixtures[0].away_name == "Club Sur"
     assert fixtures[0].competition == "Liga de prueba"
     assert fixtures[0].status == "live"
+    assert fixtures[0].home_logo_url == (
+        "https://imagecache.365scores.com/image/upload/"
+        "f_png,w_160,h_160,c_limit,q_auto:eco,dpr_2,d_Competitors:default1.png/"
+        "v7/Competitors/11"
+    )
+    assert fixtures[0].away_logo_url.endswith("/v3/Competitors/22")
 
 
 @pytest.mark.asyncio

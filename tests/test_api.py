@@ -230,6 +230,7 @@ def test_match_history_returns_safe_points_and_derived_analytics(client, reposit
         "markets",
         "total_goals",
         "scorelines",
+        "score_matrix",
         "coverage",
     }
     assert item["analytics"]["activity"]
@@ -288,11 +289,13 @@ def test_match_history_ages_fresh_at_collection_latest_observation(
         assert analytics["markets"] is not None
         assert analytics["total_goals"]
         assert analytics["scorelines"]
+        assert len(analytics["score_matrix"]) == 49
     else:
         assert analytics["next_goal"] is None
         assert analytics["markets"] is None
         assert analytics["total_goals"] == []
         assert analytics["scorelines"] == []
+        assert analytics["score_matrix"] == []
     assert repository.history["points"] == points
 
 
@@ -313,6 +316,7 @@ def test_match_history_old_suspended_quality_stays_suspended(client, repository)
     assert analytics["markets"] is None
     assert analytics["total_goals"] == []
     assert analytics["scorelines"] == []
+    assert analytics["score_matrix"] == []
     assert analytics["activity"][0]["home"] is not None
     assert len(analytics["momentum"]) == 1
 

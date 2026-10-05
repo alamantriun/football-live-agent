@@ -9,7 +9,8 @@ def test_security_headers_cover_all_routes():
     assert "content-security-policy" in headers
     assert "unsafe-eval" not in headers["content-security-policy"]
     assert "frame-ancestors 'none'" in headers["content-security-policy"]
-    assert "https://cdn.freebiesupply.com" in headers["content-security-policy"]
+    assert "https://imagecache.365scores.com" in headers["content-security-policy"]
+    assert "freebiesupply" not in headers["content-security-policy"]
     assert headers["x-content-type-options"] == "nosniff"
     assert headers["referrer-policy"] == "strict-origin-when-cross-origin"
 

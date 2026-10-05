@@ -49,6 +49,10 @@ _HEADERS = {
     "Referer": "https://www.365scores.com/es",
     "User-Agent": "football-live-agent/1.0",
 }
+_COMPETITOR_IMAGE = (
+    "https://imagecache.365scores.com/image/upload/"
+    "f_png,w_160,h_160,c_limit,q_auto:eco,dpr_2,d_Competitors:default1.png/"
+)
 
 _STAT_NAMES = {
     "posesión": "possession",
@@ -233,6 +237,21 @@ def _parse_datetime(value: Any) -> datetime | None:
     return parsed
 
 
+def _competitor_logo_url(competitor: dict[str, Any]) -> str | None:
+    competitor_id = competitor.get("id")
+    image_version = competitor.get("imageVersion")
+    if (
+        isinstance(competitor_id, bool)
+        or not isinstance(competitor_id, int)
+        or competitor_id <= 0
+        or isinstance(image_version, bool)
+        or not isinstance(image_version, int)
+        or image_version < 0
+    ):
+        return None
+    return f"{_COMPETITOR_IMAGE}v{image_version}/Competitors/{competitor_id}"
+
+
 class ProviderAdapter:
     def __init__(self, *, clock: Callable[[], datetime] | None = None) -> None:
         self._clock = clock or (lambda: datetime.now(timezone.utc))
@@ -261,8 +280,8 @@ class ProviderAdapter:
                     or "365Scores",
                     home_name=str(home["name"]),
                     away_name=str(away["name"]),
-                    home_logo_url=home.get("logo"),
-                    away_logo_url=away.get("logo"),
+                    home_logo_url=_competitor_logo_url(home),
+                    away_logo_url=_competitor_logo_url(away),
                     scheduled_at=_parse_datetime(game.get("startTime")),
                     status="live",
                 )

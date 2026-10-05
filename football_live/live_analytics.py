@@ -260,6 +260,41 @@ def _scoreline_distribution(points: Sequence[dict[str, Any]]) -> list[dict[str, 
     ]
 
 
+def _score_bucket_probabilities(rate: float, current_score: int) -> list[float]:
+    exact = [
+        0.0 if final_score < current_score else _poisson_probability(rate, final_score - current_score)
+        for final_score in range(6)
+    ]
+    return [*exact, max(0.0, 1.0 - sum(exact))]
+
+
+def _score_matrix(points: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    rates = _latest_rates(points)
+    if rates is None:
+        return []
+    home_rate, away_rate = rates
+    score_home, score_away = _current_score(points[-1])
+    home_probabilities = _score_bucket_probabilities(home_rate, score_home)
+    away_probabilities = _score_bucket_probabilities(away_rate, score_away)
+    labels = ("0", "1", "2", "3", "4", "5", "6+")
+    raw = [
+        [home_probability * away_probability for away_probability in away_probabilities]
+        for home_probability in home_probabilities
+    ]
+    rounded = [[round(value * 100.0, 2) for value in row] for row in raw]
+    difference = round(100.0 - sum(sum(row) for row in rounded), 2)
+    max_home, max_away = max(
+        ((home, away) for home in range(7) for away in range(7)),
+        key=lambda cell: raw[cell[0]][cell[1]],
+    )
+    rounded[max_home][max_away] = round(rounded[max_home][max_away] + difference, 2)
+    return [
+        {"home": labels[home], "away": labels[away], "probability": rounded[home][away]}
+        for home in range(7)
+        for away in range(7)
+    ]
+
+
 def build_live_analytics(points: Sequence[dict[str, Any]]) -> dict[str, Any]:
     bounded = list(points)[-90:]
     activity = _activity_series(bounded)
@@ -270,5 +305,6 @@ def build_live_analytics(points: Sequence[dict[str, Any]]) -> dict[str, Any]:
         "markets": _goal_markets(bounded),
         "total_goals": _total_goal_distribution(bounded),
         "scorelines": _scoreline_distribution(bounded),
+        "score_matrix": _score_matrix(bounded),
         "coverage": _coverage(bounded),
     }

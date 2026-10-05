@@ -148,6 +148,15 @@ class ScorelineResponse(StrictDomainModel):
     probability: Probability
 
 
+ScoreBucket = Literal["0", "1", "2", "3", "4", "5", "6+"]
+
+
+class ScoreMatrixCellResponse(StrictDomainModel):
+    home: ScoreBucket
+    away: ScoreBucket
+    probability: Probability
+
+
 class CoverageResponse(StrictDomainModel):
     available: _CoverageCount
     total: _CoverageCount
@@ -161,6 +170,7 @@ class LiveAnalyticsResponse(StrictDomainModel):
     markets: GoalMarketsResponse | None
     total_goals: Annotated[list[TotalGoalsResponse], Field(max_length=8)]
     scorelines: Annotated[list[ScorelineResponse], Field(max_length=5)]
+    score_matrix: Annotated[list[ScoreMatrixCellResponse], Field(max_length=49)]
     coverage: CoverageResponse
 
 

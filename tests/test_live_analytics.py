@@ -76,6 +76,14 @@ def test_poisson_outputs_are_bounded_normalized_and_sorted():
     assert len(analytics["scorelines"]) == 5
     probabilities = [row["probability"] for row in analytics["scorelines"]]
     assert probabilities == sorted(probabilities, reverse=True)
+    assert len(analytics["score_matrix"]) == 49
+    assert {row["home"] for row in analytics["score_matrix"]} == {
+        "0", "1", "2", "3", "4", "5", "6+",
+    }
+    assert {row["away"] for row in analytics["score_matrix"]} == {
+        "0", "1", "2", "3", "4", "5", "6+",
+    }
+    assert round(sum(row["probability"] for row in analytics["score_matrix"]), 2) == 100.0
 
 
 def test_scorelines_select_top_five_before_rounding_probabilities():
@@ -103,6 +111,7 @@ def test_invalid_or_absent_rates_hide_model_scenarios():
     assert analytics["markets"] is None
     assert analytics["total_goals"] == []
     assert analytics["scorelines"] == []
+    assert analytics["score_matrix"] == []
 
 
 def test_stale_quality_hides_model_scenarios():
@@ -115,6 +124,7 @@ def test_stale_quality_hides_model_scenarios():
     assert analytics["markets"] is None
     assert analytics["total_goals"] == []
     assert analytics["scorelines"] == []
+    assert analytics["score_matrix"] == []
 
 
 def test_suspended_quality_hides_model_scenarios():
@@ -127,3 +137,4 @@ def test_suspended_quality_hides_model_scenarios():
     assert analytics["markets"] is None
     assert analytics["total_goals"] == []
     assert analytics["scorelines"] == []
+    assert analytics["score_matrix"] == []
