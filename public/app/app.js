@@ -161,8 +161,9 @@ function renderDetail(item) {
   context.append(timeline); grid.append(probabilities, context); detail.append(top, scoreline, grid);
 }
 
-async function loadMatch(id) {
+async function loadMatch(id, options = {}) {
   if (!publicIdPattern.test(id)) return;
+  const preserveAnalysis = options.preserveAnalysis === true && selectedId === id;
   // Invalidate history before waiting for the newly selected summary.
   if (historyController) historyController.abort();
   historyController = null;
@@ -171,7 +172,7 @@ async function loadMatch(id) {
   detailController = requestController;
   const version = ++selectionVersion;
   selectedId = id;
-  resetAnalytics();
+  if (!preserveAnalysis) resetAnalytics();
   renderAnalyticsState("loading", "Cargando historial del partido…");
   renderMatchList(liveItems);
   detail.setAttribute("aria-busy", "true"); setStatus("Actualizando la lectura del partido…", "loading");
@@ -361,10 +362,14 @@ function renderAnalytics(item, dataStatus, modelVersion) {
 }
 
 function refreshData() {
+  const id = selectedId;
+  const version = selectionVersion;
   loadLive();
   // Capture selection now, never after an asynchronous list response. Polls do not
   // supersede requests already serving a newer selection or a manual retry.
-  if (selectedId && !detailController && !historyController) loadHistory(selectedId, selectionVersion);
+  if (id && id === selectedId && version === selectionVersion && !detailController && !historyController) {
+    loadMatch(id, { preserveAnalysis: true });
+  }
 }
 function schedulePolling() { window.clearInterval(refreshTimer); refreshTimer = window.setInterval(() => { if (!document.hidden) refreshData(); }, 20000); }
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshData(); });

@@ -120,6 +120,9 @@ test("request-local timeout cannot abort a newer selection; history timeout offe
 test("polling refreshes selected history and a late list never cancels a newer selection", async () => {
   const h = await harness(); await selected(h); h.intervals[0](); await h.flush();
   const list = h.requests.findLast(r => r.url.startsWith("/api/live"));
+  const pollDetail = h.requests.at(-1);
+  assert.ok(pollDetail.url.endsWith(A));
+  pollDetail.resolve({ item: summary(A), data_status: "fresh" }); await h.flush();
   const refreshed = h.requests.findLast(r => r.url.endsWith("/history?limit=90"));
   assert.notEqual(refreshed, h.requests[2], "20s polling refreshes history");
   const next = h.api.loadMatch(B); const detail = h.requests.at(-1);
@@ -228,7 +231,8 @@ test("resize debounces a real canvas redraw and stale-to-fresh refresh restores 
   assert.equal(h.timers.size, 1); assert.equal(canvas.calls.length, before);
   const timer = [...h.timers.values()][0]; h.timers.clear(); timer.fn();
   assert.ok(canvas.calls.length > before);
-  h.intervals[0](); const pending = h.requests.at(-1);
+  h.intervals[0](); h.requests.at(-1).resolve({ item: summary(A), data_status: "fresh" }); await h.flush();
+  const pending = h.requests.at(-1);
   const payload = history(); payload.model_version = null; payload.item.model_version = "MUST NOT FALL BACK";
   payload.item.analytics.next_goal = null;
   pending.resolve(payload); await h.flush();
@@ -246,4 +250,23 @@ test("untrusted team names and labels remain literal semantic text", async () =>
   await selected(h, payload);
   assert.match(h.nodes.get("#goals-distribution").textContent, /<img src=x/);
   assert.equal(h.nodes.get("#goals-distribution").children.some(n => n.tagName === "img"), false);
+});
+
+test("20s polling updates selected score and 1X2 before history without clearing readable analysis", async () => {
+  const h = await harness(); await selected(h);
+  const statsBefore = h.nodes.get("#team-stats").textContent;
+  h.intervals[0](); await h.flush();
+  const detail = h.requests.findLast(r => r.url === `/api/matches/${A}`);
+  assert.notEqual(detail, h.requests[1], "poll must refresh the selected summary");
+  assert.equal(h.nodes.get("#team-stats").hidden, false);
+  assert.equal(h.nodes.get("#team-stats").textContent, statsBefore);
+  detail.resolve({ item: { ...summary(A), score_home: 2, score_away: 1, minute: 65, probabilities: { home: 80.125, draw: 10, away: 9.875 } }, data_status: "fresh", model_version: "poll-model" });
+  await h.flush();
+  assert.match(h.nodes.get("#match-detail").textContent, /2—1.*65'.*80\.125%/);
+  const refreshedHistory = h.requests.at(-1);
+  assert.ok(refreshedHistory.url.endsWith("/history?limit=90"));
+  assert.equal(h.nodes.get("#team-stats").hidden, false);
+  const payload = history(); payload.item.points.at(-1).stats.shots = { home: 12, away: 3 };
+  refreshedHistory.resolve(payload); await h.flush();
+  assert.match(h.nodes.get("#team-stats").textContent, /Local: 12.*Visitante: 3/);
 });
