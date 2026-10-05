@@ -440,7 +440,8 @@ function renderCharts() {
 function renderAnalytics(item, dataStatus, modelVersion) {
   const points = Array.isArray(item.points) ? item.points : [];
   const analytics = item.analytics || {};
-  analyticsArea.dataset.liveState = matchVisualState(item);
+  const historyState = matchVisualState(item);
+  analyticsArea.dataset.liveState = historyState === "unknown" ? (detail.dataset.liveState || historyState) : historyState;
   chartState = { item: { ...item, points }, dataStatus, modelVersion };
   for (const canvas of [probabilityCanvas, activityCanvas]) { canvas.hidden = false; canvas.parentElement.hidden = false; }
   renderTeamStats(points.at(-1));

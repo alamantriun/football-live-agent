@@ -231,7 +231,6 @@ test("match list shows live minute and translated match state beside each score"
 
 test("selected live match exposes broadcast badges and motion hooks", async () => {
   const h = await harness(); const payload = history();
-  payload.item.status = "live"; payload.item.minute = 63;
   await selected(h, payload, { ...summary(A), status: "live", minute: 63 });
   assert.equal(h.nodes.get("#match-detail").dataset.liveState, "live");
   assert.equal(h.nodes.get(".analytics").dataset.liveState, "live");
