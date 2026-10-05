@@ -76,9 +76,9 @@ async function harness() {
   requests[0].resolve({ items: [summary(A), summary(B)], data_status: "fresh" }); await flush();
   return { api, nodes, requests, timers, intervals, events, flush, root };
 }
-async function selected(h, payload = history()) {
+async function selected(h, payload = history(), summaryPayload = summary(payload.item.public_id)) {
   const promise = h.api.loadMatch(payload.item.public_id);
-  h.requests.at(-1).resolve({ item: summary(payload.item.public_id), data_status: "fresh", model_version: "detail-v" }); await h.flush();
+  h.requests.at(-1).resolve({ item: summaryPayload, data_status: "fresh", model_version: "detail-v" }); await h.flush();
   const request = h.requests.at(-1);
   assert.ok(request.url.endsWith("/history?limit=90"), "selection must fetch history after summary");
   request.resolve(payload); await promise;
@@ -223,6 +223,20 @@ test("match list shows live minute and translated match state beside each score"
   assert.match(listText, /Descanso/);
   assert.match(listText, /Finalizado/);
   assert.match(listText, /Próximo/);
+  assert.match(h.nodes.get("#match-list").children[0].className, /match-live/);
+  assert.match(h.nodes.get("#match-list").children[1].className, /match-halftime/);
+  assert.match(h.nodes.get("#match-list").children[2].className, /match-finished/);
+  assert.match(h.nodes.get("#match-list").children[3].className, /match-scheduled/);
+});
+
+test("selected live match exposes broadcast badges and motion hooks", async () => {
+  const h = await harness(); const payload = history();
+  payload.item.status = "live"; payload.item.minute = 63;
+  await selected(h, payload, { ...summary(A), status: "live", minute: 63 });
+  assert.equal(h.nodes.get("#match-detail").dataset.liveState, "live");
+  assert.equal(h.nodes.get(".analytics").dataset.liveState, "live");
+  assert.match(h.nodes.get("#match-detail").textContent, /EN VIVO/);
+  assert.match(h.nodes.get("#match-detail").children[1].children[1].className, /score-live/);
 });
 
 test("history retry works, invalid UUID never fetches, detail/list timeouts stay isolated", async () => {

@@ -65,8 +65,33 @@ function safeLogo(url) {
   } catch { return null; }
 }
 
+function normalizedMatchStatus(item) {
+  return String(item.status || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function matchVisualState(item) {
+  const status = normalizedMatchStatus(item);
+  if (/(half|descanso|medio tiempo|intervalo)/.test(status)) return "halftime";
+  if (/(finished|final|full time|ended|finalizado)/.test(status)) return "finished";
+  if (/(scheduled|not started|upcoming|proximo|programado)/.test(status)) return "scheduled";
+  const minute = Number(item.minute);
+  if (status === "live" || (Number.isFinite(minute) && item.minute !== null && item.minute !== "")) return "live";
+  return "unknown";
+}
+
+function matchStateLabel(item) {
+  return { live: "EN VIVO", halftime: "DESCANSO", finished: "FINALIZADO", scheduled: "PRÓXIMO", unknown: "SEÑAL" }[matchVisualState(item)];
+}
+
+function liveBadge(item) {
+  const state = matchVisualState(item);
+  const badge = element("span", `live-badge live-badge-${state}`);
+  badge.append(element("i", "live-dot"), element("span", "", matchStateLabel(item)));
+  return badge;
+}
+
 function matchTimeLabel(item) {
-  const status = String(item.status || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const status = normalizedMatchStatus(item);
   if (/(half|descanso|medio tiempo|intervalo)/.test(status)) return "Descanso";
   if (/(finished|final|full time|ended|finalizado)/.test(status)) return "Finalizado";
   if (/(scheduled|not started|upcoming|proximo|programado)/.test(status)) return "Próximo";
@@ -130,8 +155,10 @@ function renderMatchList(items) {
   if (!items.length) { list.append(element("p", "muted", "No hay partidos publicados en este momento.")); return; }
   const favorites = new Set(loadFavorites());
   [...items].sort((a, b) => Number(favorites.has(b.public_id)) - Number(favorites.has(a.public_id))).forEach((item) => {
-    const button = element("button", "match-button");
+    const visualState = matchVisualState(item);
+    const button = element("button", `match-button match-${visualState}`);
     button.type = "button";
+    button.dataset.liveState = visualState;
     button.setAttribute("aria-pressed", String(item.public_id === selectedId));
     const timeLabel = matchTimeLabel(item);
     button.setAttribute("aria-label", `${item.home_name} contra ${item.away_name}, ${timeLabel}, marcador ${item.score_home ?? "—"} a ${item.score_away ?? "—"}`);
@@ -143,7 +170,7 @@ function renderMatchList(items) {
     away.append(clubMark(item.away_name, item.away_logo_url), element("span", "", item.away_name));
     clubs.append(home, element("span", "versus", "vs"), away);
     const matchMeta = element("span", "match-meta");
-    matchMeta.append(element("small", "match-time", timeLabel), element("small", "", item.competition || "Competición no disponible"));
+    matchMeta.append(element("small", `match-time match-time-${visualState}`, timeLabel), element("small", "", item.competition || "Competición no disponible"));
     copy.append(clubs, matchMeta);
     button.append(copy, element("span", "match-list-score", `${item.score_home ?? "—"} · ${item.score_away ?? "—"}`));
     button.addEventListener("click", () => loadMatch(item.public_id));
@@ -161,12 +188,15 @@ function probabilityCard(label, value) {
 
 function renderDetail(item) {
   detail.setAttribute("aria-busy", "false");
+  const visualState = matchVisualState(item);
+  detail.dataset.liveState = visualState;
+  analyticsArea.dataset.liveState = visualState;
   detail.replaceChildren();
   const top = element("div", "detail-topline");
-  top.append(element("span", "", item.competition || "Lectura en vivo"), element("span", `quality ${item.data_status}`, item.data_status === "degraded" ? "Datos parciales" : `Datos ${item.data_status}`));
+  top.append(element("span", "", item.competition || "Lectura en vivo"), liveBadge(item), element("span", `quality ${item.data_status}`, item.data_status === "degraded" ? "Datos parciales" : `Datos ${item.data_status}`));
   const scoreline = element("div", "scoreline");
   const home = element("div", "club"); home.append(clubMark(item.home_name, item.home_logo_url), element("span", "", item.home_name));
-  const score = element("div", "score", `${item.score_home ?? "—"}—${item.score_away ?? "—"}`); score.append(element("small", "", item.minute == null ? "Minuto no disponible" : `${item.minute}'`));
+  const score = element("div", `score score-${visualState}`, `${item.score_home ?? "—"}—${item.score_away ?? "—"}`); score.append(element("small", "", item.minute == null ? "Minuto no disponible" : `${item.minute}'`));
   const away = element("div", "club away"); away.append(element("span", "", item.away_name), clubMark(item.away_name, item.away_logo_url));
   scoreline.append(home, score, away);
   const grid = element("div", "detail-grid");
@@ -203,7 +233,7 @@ async function loadMatch(id, options = {}) {
     const item = { ...response.item, data_status: response.data_status ?? response.item.data_status, model_version: response.model_version ?? response.item.model_version };
     renderDetail(item);
     loadedSummary = { id, version, item };
-    setStatus(item.data_status === "degraded" ? "Datos parciales: la lectura conserva señales ausentes." : "Lectura actualizada.", item.data_status);
+    setStatus(item.data_status === "degraded" ? "Datos parciales: la lectura conserva señales ausentes." : `Lectura actualizada · ${matchStateLabel(item)}.`, item.data_status);
     detailController = null;
     await loadHistory(id, version);
   } catch (error) {
@@ -222,6 +252,7 @@ async function loadLive() {
   if (listController) listController.abort();
   const requestController = new AbortController();
   listController = requestController;
+  refresh.dataset.refreshing = "true";
   if (!selectedId) setStatus("Cargando partidos disponibles…", "loading");
   try {
     const response = await fetchWithTimeout("/api/live?limit=24", requestController);
@@ -236,7 +267,7 @@ async function loadLive() {
     if (listController !== requestController || error.name === "AbortError") return;
     list.replaceChildren(element("p", "muted", "No pudimos cargar los partidos."));
     if (!selectedId) setStatus("Servicio no disponible temporalmente.", "error");
-  } finally { if (listController === requestController) listController = null; }
+  } finally { if (listController === requestController) { listController = null; refresh.dataset.refreshing = "false"; } }
 }
 
 function renderAnalyticsState(state, message) {
@@ -409,6 +440,7 @@ function renderCharts() {
 function renderAnalytics(item, dataStatus, modelVersion) {
   const points = Array.isArray(item.points) ? item.points : [];
   const analytics = item.analytics || {};
+  analyticsArea.dataset.liveState = matchVisualState(item);
   chartState = { item: { ...item, points }, dataStatus, modelVersion };
   for (const canvas of [probabilityCanvas, activityCanvas]) { canvas.hidden = false; canvas.parentElement.hidden = false; }
   renderTeamStats(points.at(-1));

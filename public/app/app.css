@@ -41,3 +41,24 @@
 .match-list{grid-template-columns:repeat(3,minmax(0,1fr))}
 @media(max-width:64rem){.match-list{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:48rem){.match-list{grid-template-columns:1fr}}
+.live-badge{align-items:center;border:1px solid var(--line);display:inline-flex;gap:.45rem;padding:.35rem .55rem;white-space:nowrap}
+.live-badge-live{border-color:rgba(223,255,84,.7);color:var(--lime)}
+.live-badge-halftime{border-color:rgba(255,217,77,.7);color:var(--yellow)}
+.live-badge-finished,.live-badge-scheduled,.live-badge-unknown{color:var(--muted)}
+.live-dot{background:currentColor;border-radius:50%;display:inline-block;height:.48rem;width:.48rem}
+.live-badge-live .live-dot{animation:live-dot-pulse 1.5s ease-out infinite;box-shadow:0 0 0 0 rgb(223 255 84 / .55)}
+.match-button.match-live .match-time::before{background:var(--lime);border-radius:50%;content:"";display:inline-block;height:.42rem;margin:0 .4rem .05rem 0;width:.42rem}
+.match-button.match-live .match-list-score{animation:live-score-breathe 2.4s ease-in-out infinite}
+.match-button.match-halftime .match-time{color:var(--yellow)}
+.match-button.match-finished .match-time{color:var(--muted)}
+.match-button.match-scheduled .match-time{color:var(--white)}
+.match-button.match-live:hover,.match-button.match-live[aria-pressed=true]{box-shadow:inset 3px 0 0 var(--lime)}
+.score-live{animation:live-score-breathe 2.4s ease-in-out infinite;color:var(--lime)}
+.analytics[data-live-state=live] .score-matrix-cell{animation:matrix-live-pulse 3.2s ease-in-out infinite}
+#refresh[data-refreshing=true]{align-items:center;display:inline-flex;gap:.55rem}
+#refresh[data-refreshing=true]::after{border:2px solid rgb(223 255 84 / .35);border-radius:50%;border-top-color:var(--lime);content:"";height:.8rem;width:.8rem;animation:live-spin .8s linear infinite}
+@keyframes live-dot-pulse{0%{box-shadow:0 0 0 0 rgb(223 255 84 / .55);transform:scale(.85)}70%{box-shadow:0 0 0 .45rem rgb(223 255 84 / 0);transform:scale(1)}100%{box-shadow:0 0 0 0 rgb(223 255 84 / 0);transform:scale(.85)}}
+@keyframes live-score-breathe{0%,100%{text-shadow:0 0 0 rgb(223 255 84 / 0);transform:scale(1)}50%{text-shadow:0 0 1.2rem rgb(223 255 84 / .28);transform:scale(1.015)}}
+@keyframes matrix-live-pulse{0%,100%{filter:saturate(1);box-shadow:inset 0 0 0 0 rgb(223 255 84 / 0)}50%{filter:saturate(1.2);box-shadow:inset 0 0 0 1px rgb(223 255 84 / .25)}}
+@keyframes live-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.live-badge-live .live-dot,.match-button.match-live .match-list-score,.score-live,.analytics[data-live-state=live] .score-matrix-cell,#refresh[data-refreshing=true]::after{animation:none}}
