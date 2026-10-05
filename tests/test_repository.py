@@ -6,7 +6,13 @@ import pytest
 from pydantic import ValidationError
 
 from football_live import domain
-from football_live.domain import Fixture, LiveSnapshot, ModelVersion, PredictionRecord
+from football_live.domain import (
+    Fixture,
+    LiveSnapshot,
+    MatchEvent,
+    ModelVersion,
+    PredictionRecord,
+)
 from football_live.repository import Repository, RepositoryUnavailable
 from football_live.settings import Settings
 from football_live.supabase_gateway import SupabaseGateway
@@ -542,6 +548,69 @@ def test_fixture_upsert_uses_private_schema_conflict_and_canonical_payload(
 def test_empty_fixture_upsert_does_not_create_an_operation(gateway, fake_client):
     assert gateway.upsert_fixtures([]) == 0
     assert fake_client.operations == []
+
+
+def test_store_match_events_upserts_only_canonical_fields_by_fixture_and_order(
+    gateway, fake_client, fixture
+):
+    events = [
+        MatchEvent(
+            provider_order=2,
+            minute=45,
+            added_time=3,
+            side="away",
+            kind="yellow_card",
+        )
+    ]
+    fake_client.responses[("private", "table", "match_events")] = [{}]
+
+    assert gateway.store_match_events(fixture, events) == 1
+
+    operation = fake_client.operations[-1]
+    assert operation["schema"] == "private"
+    assert operation["name"] == "match_events"
+    assert operation["on_conflict"] == "fixture_id,provider_event_order"
+    assert operation["payload"] == [
+        {
+            "fixture_id": str(FIXTURE_ID),
+            "provider_event_order": 2,
+            "minute": 45,
+            "added_time": 3,
+            "side": "away",
+            "kind": "yellow_card",
+        }
+    ]
+
+
+def test_store_match_events_skips_empty_events_without_a_database_write(
+    gateway, fake_client, fixture
+):
+    assert gateway.store_match_events(fixture, ()) == 0
+    assert fake_client.operations == []
+
+
+def test_store_match_events_rejects_an_unpersisted_fixture(gateway, fake_client, fixture):
+    event = MatchEvent(provider_order=1, minute=1, side="home", kind="goal")
+
+    with pytest.raises(ValueError, match="persisted fixture is required"):
+        gateway.store_match_events(fixture.model_copy(update={"id": None}), [event])
+
+    assert fake_client.operations == []
+
+
+def test_store_match_events_reuses_the_fixture_and_order_conflict_key(
+    gateway, fake_client, fixture
+):
+    event = MatchEvent(provider_order=1, minute=74, side="away", kind="goal")
+    fake_client.responses[("private", "table", "match_events")] = [{}]
+
+    assert gateway.store_match_events(fixture, [event]) == 1
+    assert gateway.store_match_events(fixture, [event]) == 1
+
+    assert [operation["on_conflict"] for operation in fake_client.operations] == [
+        "fixture_id,provider_event_order",
+        "fixture_id,provider_event_order",
+    ]
 
 
 def test_sync_live_fixture_logos_updates_only_public_logo_columns(

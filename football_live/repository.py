@@ -4,7 +4,14 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Protocol, Sequence
 from uuid import UUID
 
-from .domain import Fixture, JobClaim, LiveSnapshot, ModelVersion, PredictionRecord
+from .domain import (
+    Fixture,
+    JobClaim,
+    LiveSnapshot,
+    MatchEvent,
+    ModelVersion,
+    PredictionRecord,
+)
 
 if TYPE_CHECKING:
     from .training import CandidateEvaluation, TrainingExample, TrainingRun
@@ -16,6 +23,10 @@ class RepositoryUnavailable(RuntimeError):
 
 class Repository(Protocol):
     def upsert_fixtures(self, fixtures: Sequence[Fixture]) -> int: ...
+
+    def store_match_events(
+        self, fixture: Fixture, events: Sequence[MatchEvent]
+    ) -> int: ...
 
     def active_fixtures(self, limit: int = 12) -> list[Fixture]: ...
 

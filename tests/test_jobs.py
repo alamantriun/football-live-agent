@@ -9,6 +9,7 @@ from football_live.domain import (
     Fixture,
     HomeAwayFloat,
     JobClaim,
+    MatchEvent,
     ModelVersion,
     PredictionRecord,
 )
@@ -66,6 +67,7 @@ def make_provider_snapshot(
     observed_at: datetime = NOW,
     home_logo_url: str | None = None,
     away_logo_url: str | None = None,
+    events: tuple[MatchEvent, ...] = (),
 ) -> ProviderSnapshot:
     return ProviderSnapshot(
         provider_fixture_id=fixture.provider_fixture_id,
@@ -77,6 +79,7 @@ def make_provider_snapshot(
         stats=ProviderStats(),
         provider_observed_at=observed_at,
         quality=DataStatus.DEGRADED,
+        events=events,
         home_logo_url=home_logo_url,
         away_logo_url=away_logo_url,
         sanitized_provider_data={"status": status},
@@ -112,6 +115,7 @@ class FakeRepository:
         self.unfinished = []
         self.upserted = []
         self.snapshots = []
+        self.stored_events = []
         self.predictions = []
         self.published_predictions = []
         self.synced_live_logos = []
@@ -140,6 +144,10 @@ class FakeRepository:
         snapshot_id = UUID(int=30_000 + len(self.snapshots))
         self.snapshots.append(snapshot.model_copy(update={"id": snapshot_id}))
         return snapshot_id
+
+    def store_match_events(self, fixture, events):
+        self.stored_events.extend((fixture, event) for event in events)
+        return len(events)
 
     def store_prediction(self, prediction):
         self.predictions.append(prediction)
@@ -353,10 +361,12 @@ async def test_collect_caps_at_12_uses_concurrency_two_and_skips_stale_sentinel(
     assert result.counters == {
         "selected": 12,
         "snapshots": 11,
+        "events": 0,
         "predictions": 10,
         "published": 10,
         "skipped_predictions": 1,
         "provider_errors": 1,
+        "event_errors": 0,
         "processing_errors": 0,
     }
     assert repo.finishes[-1][2] == "succeeded"
@@ -389,6 +399,64 @@ async def test_collect_backfills_provider_logos_even_when_match_has_finished():
     assert repo.upserted[0].away_logo_url == snapshot.away_logo_url
     assert repo.synced_live_logos == repo.upserted
     assert result.counters["skipped_predictions"] == 1
+    assert repo.snapshots == []
+
+
+@pytest.mark.asyncio
+async def test_collect_persists_events_before_skipping_finished_fixture():
+    fixture = make_fixture(1)
+    repo = FakeRepository()
+    repo.fixtures = [fixture]
+    provider = FakeProvider(
+        snapshots={
+            fixture.provider_fixture_id: make_provider_snapshot(
+                fixture,
+                status="Finalizado",
+                events=(
+                    MatchEvent(
+                        provider_order=1,
+                        minute=74,
+                        side="away",
+                        kind="goal",
+                    ),
+                ),
+            )
+        }
+    )
+
+    result = await run_collect(
+        repo, provider, FakePredictor(), HTTP_REQUEST_ID, "collect:events"
+    )
+
+    assert result.counters["events"] == 1
+    assert result.counters["skipped_predictions"] == 1
+    assert len(repo.stored_events) == 1
+
+
+@pytest.mark.asyncio
+async def test_collect_sanitizes_event_store_failures_and_stops_only_that_fixture():
+    fixture = make_fixture(1)
+    repo = FakeRepository()
+    repo.fixtures = [fixture]
+
+    def fail_events(*_args):
+        raise RuntimeError("raw provider event payload must not be exposed")
+
+    repo.store_match_events = fail_events
+    result = await run_collect(
+        repo,
+        FakeProvider(
+            snapshots={fixture.provider_fixture_id: make_provider_snapshot(fixture)}
+        ),
+        FakePredictor(),
+        HTTP_REQUEST_ID,
+        "collect:event-store-failure",
+    )
+
+    assert result.counters["event_errors"] == 1
+    assert result.counters["processing_errors"] == 1
+    assert result.counters["processing_error_stages"] == {"events": 1}
+    assert "raw provider event payload" not in str(result)
     assert repo.snapshots == []
 
 

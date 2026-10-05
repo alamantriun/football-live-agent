@@ -6,7 +6,14 @@ from math import isfinite
 from typing import Any
 from uuid import UUID
 
-from .domain import Fixture, JobClaim, LiveSnapshot, ModelVersion, PredictionRecord
+from .domain import (
+    Fixture,
+    JobClaim,
+    LiveSnapshot,
+    MatchEvent,
+    ModelVersion,
+    PredictionRecord,
+)
 from .repository import RepositoryUnavailable
 from .settings import Settings
 from .training import CandidateEvaluation, TrainingExample, TrainingRun
@@ -111,6 +118,33 @@ class SupabaseGateway:
             .table("fixtures")
             .upsert(payload, on_conflict="provider,provider_fixture_id")
             .select("id")
+            .execute()
+        )
+        return len(self._rows(response))
+
+    def store_match_events(
+        self, fixture: Fixture, events: Sequence[MatchEvent]
+    ) -> int:
+        if fixture.id is None:
+            raise ValueError("persisted fixture is required")
+        if not events:
+            return 0
+        payload = [
+            {
+                "fixture_id": str(fixture.id),
+                "provider_event_order": event.provider_order,
+                "minute": event.minute,
+                "added_time": event.added_time,
+                "side": event.side,
+                "kind": event.kind,
+            }
+            for event in events
+        ]
+        response = self._execute(
+            lambda: self._client.schema("private")
+            .table("match_events")
+            .upsert(payload, on_conflict="fixture_id,provider_event_order")
+            .select("fixture_id")
             .execute()
         )
         return len(self._rows(response))

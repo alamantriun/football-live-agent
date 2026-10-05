@@ -3,15 +3,28 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(45);
+select plan(62);
 
 select has_table('private', 'fixtures', 'fixtures exists');
 select has_table('private', 'predictions', 'predictions exists');
+select has_table('private', 'match_events', 'private match events exist');
 select has_view('public', 'live_matches', 'public live view exists');
 select has_view('public', 'model_status', 'public model view exists');
+select ok(
+  (select relrowsecurity from pg_class where oid = 'private.match_events'::regclass),
+  'match events has row level security enabled'
+);
 select ok(not has_schema_privilege('anon', 'private', 'USAGE'), 'anon cannot use private schema');
 select ok(not has_table_privilege('anon', 'private.fixtures', 'SELECT'), 'anon cannot read fixtures');
 select ok(not has_table_privilege('anon', 'private.fixtures', 'INSERT'), 'anon cannot write fixtures');
+select ok(not has_table_privilege('anon', 'private.match_events', 'SELECT'), 'anon cannot read match events');
+select ok(not has_table_privilege('anon', 'private.match_events', 'INSERT'), 'anon cannot write match events');
+select ok(not has_table_privilege('authenticated', 'private.match_events', 'SELECT'), 'authenticated cannot read match events');
+select ok(has_table_privilege('service_role', 'private.match_events', 'SELECT'), 'service can read match events');
+select ok(has_table_privilege('service_role', 'private.match_events', 'INSERT'), 'service can insert match events');
+select ok(has_table_privilege('service_role', 'private.match_events', 'UPDATE'), 'service can update match events');
+select ok(not has_table_privilege('service_role', 'private.match_events', 'DELETE'), 'service cannot delete match events');
+select has_index('private', 'match_events', 'match_events_fixture_timeline_idx', 'match event timeline index exists');
 select ok(has_table_privilege('anon', 'public.live_matches', 'SELECT'), 'anon can read safe live view');
 select ok(not has_table_privilege('anon', 'public.live_match_projection', 'INSERT'), 'anon cannot write projection');
 select ok(has_function_privilege('service_role', 'private.claim_job(text,text,integer)', 'EXECUTE'), 'service can claim jobs');
@@ -54,6 +67,12 @@ select throws_ok(
   null,
   'anon projection writes fail at execution time'
 );
+select throws_ok(
+  $$select count(*) from private.match_events$$,
+  '42501',
+  null,
+  'anon match-event reads fail at execution time'
+);
 reset role;
 
 -- Task 2 deliberately mutates malformed evidence to exercise promotion guards.
@@ -64,6 +83,83 @@ alter table private.training_runs disable trigger training_runs_immutable_eviden
 grant insert, update on private.model_versions, private.training_runs to service_role;
 
 set local role service_role;
+
+with inserted as (
+  insert into private.fixtures (
+    provider, provider_fixture_id, competition, home_name, away_name, status
+  ) values (
+    '365scores', 'test-match-events', 'test league', 'event home', 'event away', 'live'
+  )
+  returning id
+)
+select set_config('test.event_fixture_id', id::text, true) from inserted;
+
+select lives_ok(
+  $$
+    insert into private.match_events (
+      fixture_id, provider_event_order, minute, added_time, side, kind
+    ) values (
+      current_setting('test.event_fixture_id')::uuid, 1, 44, 2, 'home', 'goal'
+    )
+  $$,
+  'service can persist a canonical match event'
+);
+select set_config(
+  'test.event_first_observed_at',
+  first_observed_at::text,
+  true
+)
+from private.match_events
+where fixture_id = current_setting('test.event_fixture_id')::uuid
+  and provider_event_order = 1;
+select throws_ok(
+  $$
+    insert into private.match_events (
+      fixture_id, provider_event_order, minute, side, kind
+    ) values (
+      current_setting('test.event_fixture_id')::uuid, 1, 44, 'home', 'goal'
+    )
+  $$,
+  '23505',
+  null,
+  'fixture event order is unique'
+);
+select lives_ok(
+  $$
+    insert into private.match_events as events (
+      fixture_id, provider_event_order, minute, added_time, side, kind
+    ) values (
+      current_setting('test.event_fixture_id')::uuid, 1, 45, null, 'away', 'yellow_card'
+    )
+    on conflict (fixture_id, provider_event_order) do update
+    set minute = excluded.minute,
+        added_time = excluded.added_time,
+        side = excluded.side,
+        kind = excluded.kind
+  $$,
+  're-observation updates canonical match event fields'
+);
+select is(
+  (select first_observed_at::text from private.match_events
+   where fixture_id = current_setting('test.event_fixture_id')::uuid
+     and provider_event_order = 1),
+  current_setting('test.event_first_observed_at'),
+  're-observation preserves first observation timestamp'
+);
+select is(
+  (select minute from private.match_events
+   where fixture_id = current_setting('test.event_fixture_id')::uuid
+     and provider_event_order = 1),
+  45::smallint,
+  're-observation updates the canonical event fields'
+);
+select ok(
+  (select last_observed_at > first_observed_at
+   from private.match_events
+   where fixture_id = current_setting('test.event_fixture_id')::uuid
+     and provider_event_order = 1),
+  're-observation refreshes last observation timestamp'
+);
 
 select
   set_config('test.old_run_id', id::text, true),

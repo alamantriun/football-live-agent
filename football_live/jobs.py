@@ -170,10 +170,12 @@ async def run_collect(repo, provider, predictor, request_id: UUID, key: str) -> 
         counters = {
             "selected": len(fixtures),
             "snapshots": 0,
+            "events": 0,
             "predictions": 0,
             "published": 0,
             "skipped_predictions": 0,
             "provider_errors": 0,
+            "event_errors": 0,
             "processing_errors": 0,
         }
         if not fixtures:
@@ -208,6 +210,17 @@ async def run_collect(repo, provider, predictor, request_id: UUID, key: str) -> 
                             stage_counts.get("fixture_logos", 0) + 1
                         )
                         return
+
+                try:
+                    counters["events"] += repo.store_match_events(
+                        fixture, provider_snapshot.events
+                    )
+                except Exception:
+                    counters["event_errors"] += 1
+                    counters["processing_errors"] += 1
+                    stage_counts = counters.setdefault("processing_error_stages", {})
+                    stage_counts["events"] = stage_counts.get("events", 0) + 1
+                    return
 
                 status = _plain_status(
                     provider_snapshot.sanitized_provider_data.get("status")
