@@ -53,6 +53,14 @@ class HomeAwayFloat(StrictDomainModel):
     away: NonNegativeFloat
 
 
+class MatchEvent(StrictDomainModel):
+    provider_order: int = Field(ge=1, le=10_000)
+    minute: MatchMinute
+    added_time: int | None = Field(default=None, ge=0, le=30)
+    side: Literal["home", "away"]
+    kind: Literal["goal", "yellow_card", "red_card"]
+
+
 class Fixture(StrictDomainModel):
     id: UUID | None = None
     public_id: UUID | None = None

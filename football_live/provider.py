@@ -5,6 +5,7 @@ import json
 import math
 import random
 import re
+import unicodedata
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from typing import Any
@@ -15,6 +16,7 @@ from pydantic import AwareDatetime, Field
 from football_live.domain import (
     DataStatus,
     HomeAwayStat,
+    MatchEvent,
     MatchMinute,
     Score,
     StrictDomainModel,
@@ -95,6 +97,15 @@ _LEGACY_STAT_NAMES = {
     "offsides": "fueras_juego",
     "expected_goals": "xg",
 }
+_EVENT_TYPE_IDS = {1: "goal", 2: "yellow_card", 3: "red_card"}
+_EVENT_TYPE_NAMES = {
+    "goal": "goal",
+    "gol": "goal",
+    "yellow card": "yellow_card",
+    "tarjeta amarilla": "yellow_card",
+    "red card": "red_card",
+    "tarjeta roja": "red_card",
+}
 
 
 class ProviderUnavailable(RuntimeError):
@@ -140,6 +151,7 @@ class ProviderSnapshot(StrictDomainModel):
     stats: ProviderStats
     provider_observed_at: AwareDatetime
     quality: DataStatus
+    events: tuple[MatchEvent, ...] = ()
     sanitized_provider_data: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -227,6 +239,21 @@ def parse_statistics_legacy(
     }
 
 
+def _parse_integral(value: Any, *, minimum: int, maximum: int) -> int | None:
+    parsed = parse_number(value)
+    if parsed is None or not parsed.is_integer():
+        return None
+    integer = int(parsed)
+    return integer if minimum <= integer <= maximum else None
+
+
+def _normalize_event_name(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    normalized = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode()
+    return " ".join(re.findall(r"[a-z0-9]+", normalized.lower()))
+
+
 def _parse_datetime(value: Any) -> datetime | None:
     if not isinstance(value, str) or not value.strip():
         return None
@@ -290,6 +317,79 @@ class ProviderAdapter:
             )
         return fixtures
 
+    def parse_events(
+        self, game: dict[str, Any], home_id: int, away_id: int
+    ) -> tuple[MatchEvent, ...]:
+        raw_events = game.get("events")
+        if not isinstance(raw_events, list):
+            return ()
+
+        events: list[MatchEvent] = []
+        for raw_event in raw_events:
+            if not isinstance(raw_event, dict):
+                continue
+            provider_order = _parse_integral(
+                raw_event.get("order"), minimum=1, maximum=10_000
+            )
+            minute = _parse_integral(
+                raw_event.get("gameTime"), minimum=0, maximum=150
+            )
+            added_time_value = raw_event.get("addedTime")
+            added_time = (
+                None
+                if added_time_value is None
+                else _parse_integral(added_time_value, minimum=0, maximum=30)
+            )
+            competitor_id = raw_event.get("competitorId")
+            if (
+                provider_order is None
+                or minute is None
+                or (added_time_value is not None and added_time is None)
+                or isinstance(competitor_id, bool)
+            ):
+                continue
+            side = (
+                "home"
+                if competitor_id == home_id
+                else "away"
+                if competitor_id == away_id
+                else None
+            )
+            if side is None:
+                continue
+
+            event_type = raw_event.get("eventType")
+            if not isinstance(event_type, dict):
+                continue
+            event_name = _normalize_event_name(event_type.get("name"))
+            if "var" in event_name.split():
+                continue
+            type_id = _parse_integral(
+                event_type.get("id"), minimum=1, maximum=10_000
+            )
+            kind = _EVENT_TYPE_IDS.get(type_id) or _EVENT_TYPE_NAMES.get(event_name)
+            if kind is None:
+                continue
+            events.append(
+                MatchEvent(
+                    provider_order=provider_order,
+                    minute=minute,
+                    added_time=added_time,
+                    side=side,
+                    kind=kind,
+                )
+            )
+        return tuple(
+            sorted(
+                events,
+                key=lambda event: (
+                    event.minute,
+                    event.added_time or 0,
+                    event.provider_order,
+                ),
+            )
+        )
+
     def parse_snapshot(self, payload: dict[str, Any]) -> ProviderSnapshot:
         if not isinstance(payload, dict):
             raise ProviderUnavailable("provider unavailable")
@@ -352,6 +452,7 @@ class ProviderAdapter:
             stats=stats,
             provider_observed_at=self._clock(),
             quality=DataStatus.DEGRADED if partial else DataStatus.FRESH,
+            events=self.parse_events(game, home["id"], away["id"]),
             sanitized_provider_data={"status": status},
         )
 

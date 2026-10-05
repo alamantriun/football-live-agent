@@ -166,6 +166,56 @@ def test_partial_snapshot_preserves_missing_stats_and_real_zero():
     assert snapshot.away_logo_url.endswith("/v8/Competitors/22")
 
 
+def test_snapshot_keeps_only_verified_goals_and_cards_with_team_and_added_time():
+    payload = load_fixture("game_events.json")
+    snapshot = ProviderAdapter(clock=lambda: OBSERVED_AT).parse_snapshot(payload)
+
+    assert [event.model_dump() for event in snapshot.events] == [
+        {"provider_order": 1, "minute": 17, "added_time": None, "side": "home", "kind": "goal"},
+        {"provider_order": 2, "minute": 45, "added_time": 3, "side": "away", "kind": "yellow_card"},
+        {"provider_order": 3, "minute": 73, "added_time": None, "side": "home", "kind": "red_card"},
+    ]
+    assert snapshot.sanitized_provider_data == {"status": "2º Tiempo"}
+
+
+def test_snapshot_treats_missing_or_empty_events_as_empty():
+    payload = load_fixture("game_partial.json")
+    adapter = ProviderAdapter(clock=lambda: OBSERVED_AT)
+
+    assert adapter.parse_snapshot(payload).events == ()
+    payload["game"]["events"] = []
+    assert adapter.parse_snapshot(payload).events == ()
+
+
+@pytest.mark.asyncio
+async def test_client_snapshot_retains_events_with_one_game_and_stats_request():
+    payload = load_fixture("game_events.json")
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/web/game/":
+            return httpx.Response(200, json={"game": payload["game"]})
+        if request.url.path == "/web/game/stats/":
+            return httpx.Response(200, json={"statistics": payload["statistics"]})
+        return httpx.Response(404)
+
+    async with ProviderClient(
+        transport=httpx.MockTransport(handler), sleep=no_sleep, jitter=lambda: 0.0
+    ) as client:
+        snapshot = await client.get_snapshot("123456789")
+
+    assert [event.kind for event in snapshot.events] == [
+        "goal",
+        "yellow_card",
+        "red_card",
+    ]
+    assert [request.url.path for request in requests] == [
+        "/web/game/",
+        "/web/game/stats/",
+    ]
+
+
 def test_live_list_uses_canonical_fields_and_internal_live_status():
     payload = load_fixture("live_list.json")
     payload["games"][0]["homeCompetitor"].update({"id": 11, "imageVersion": 7})

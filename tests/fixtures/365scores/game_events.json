@@ -1,0 +1,22 @@
+{
+  "game": {
+    "id": 123456789,
+    "statusText": "2º Tiempo",
+    "gameTime": 73,
+    "homeCompetitor": {"id": 11, "name": "Club Norte", "score": 1},
+    "awayCompetitor": {"id": 22, "name": "Club Sur", "score": 0},
+    "events": [
+      {"order": 3, "gameTime": "73", "competitorId": 11, "eventType": {"id": 3, "name": "Tarjeta roja"}},
+      {"order": 1, "gameTime": "17", "addedTime": null, "competitorId": 11, "eventType": {"id": 1, "name": "Gol"}},
+      {"order": 2, "gameTime": 45, "addedTime": "3", "competitorId": 22, "eventType": {"id": 99, "name": "Tarjeta amarilla"}},
+      {"order": 4, "gameTime": 25, "competitorId": 11, "eventType": {"id": 4, "name": "Sustitución"}},
+      {"order": 5, "gameTime": 31, "competitorId": 11, "eventType": {"id": 5, "name": "VAR"}},
+      {"order": 6, "gameTime": 39, "competitorId": 999, "eventType": {"id": 1, "name": "Gol"}},
+      {"order": "not-an-order", "gameTime": 52, "competitorId": 11, "eventType": {"id": 1, "name": "Gol"}},
+      {"order": 8, "gameTime": "52.5", "competitorId": 11, "eventType": {"id": 1, "name": "Gol"}},
+      {"order": 9, "gameTime": 64, "addedTime": -1, "competitorId": 22, "eventType": {"id": 2, "name": "Tarjeta amarilla"}},
+      {"order": 10, "gameTime": 66, "competitorId": 22, "eventType": {"id": 99, "name": "Incidencia desconocida"}}
+    ]
+  },
+  "statistics": []
+}
