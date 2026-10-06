@@ -5,6 +5,5 @@
 @media (max-width: 48rem) {
   .section-intro h2,
   .method h2,
-  .demo h2,
-  .evidence h2 { font-size: 2.7rem; }
+  .demo h2 { font-size: 2.7rem; }
 }

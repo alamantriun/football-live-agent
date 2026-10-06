@@ -15,6 +15,20 @@ def test_landing_structure_and_approved_reading_order():
     assert "wikipedia" not in html.lower()
 
 
+def test_landing_removes_transparency_section_but_keeps_model_link():
+    html = (PUBLIC / "index.html").read_text(encoding="utf-8")
+    overrides = (PUBLIC / "assets" / "landing-overrides.css").read_text(encoding="utf-8")
+
+    assert 'href="/modelo"' in html
+    assert 'href="#evidencia"' not in html
+    assert 'id="evidencia"' not in html
+    assert 'class="evidence"' not in html
+    assert 'class="evidence-copy reveal"' not in html
+    assert 'class="evidence-panel reveal"' not in html
+    assert "Transparencia" not in html
+    assert ".evidence h2" not in overrides
+
+
 def test_landing_uses_local_assets_and_accessible_motion_controls():
     html = (PUBLIC / "index.html").read_text(encoding="utf-8")
     css = (PUBLIC / "assets" / "site.css").read_text(encoding="utf-8")
