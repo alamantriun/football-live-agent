@@ -29,6 +29,7 @@ let chartState = null;
 let detailSnapshot = null;
 let statsSnapshot = null;
 let matrixSnapshot = null;
+let matchEventSnapshot = { id: null, keys: new Set() };
 let resizeTimer = null;
 let refreshTimer = null;
 const refreshIntervalSeconds = 20;
@@ -274,7 +275,13 @@ function renderDetail(item) {
   const scoreline = element("div", "scoreline");
   const home = element("div", "club"); home.append(clubMark(item.home_name, item.home_logo_url), element("span", "", item.home_name));
   const scoreClass = detailChanged.score || detailChanged.minute ? `score score-${visualState} value-changed` : `score score-${visualState}`;
-  const score = element("div", scoreClass, `${item.score_home ?? "—"}—${item.score_away ?? "—"}`); score.append(element("small", "", item.minute == null ? "Minuto no disponible" : `${item.minute}'`));
+  const score = element("div", scoreClass);
+  score.append(
+    element("b", "score-value score-home", item.score_home ?? "—"),
+    element("span", "score-separator", "—"),
+    element("b", "score-value score-away", item.score_away ?? "—"),
+    element("small", "", item.minute == null ? "Minuto no disponible" : `${item.minute}'`),
+  );
   const away = element("div", "club away"); away.append(element("span", "", item.away_name), clubMark(item.away_name, item.away_logo_url));
   scoreline.append(home, score, away);
   const grid = element("div", "detail-grid");
@@ -604,22 +611,33 @@ function renderMatchEvents(item) {
   matchEvents.replaceChildren();
   matchEventsSection.hidden = false;
   if (!events.length) {
+    matchEventSnapshot = { id: item.public_id, keys: new Set() };
     matchEvents.append(element("li", "match-event-empty", "Sin eventos verificables publicados todavía."));
     return;
   }
-  for (const event of events) {
+  const currentKeys = new Set();
+  for (const [index, event] of events.entries()) {
     const minute = `${event.minute}${Number.isInteger(event.added_time) && event.added_time > 0 ? `+${event.added_time}` : ""}'`;
     const team = event.side === "away" ? item.away_name : item.home_name;
     const type = eventTypes[event.kind];
     const copy = event.kind === "shot" ? `${type.label} +${event.increment} · ${team}` : `${type.label} · ${team}`;
     const shotWord = event.increment === 1 ? "tiro" : "tiros";
-    const row = element("li", `match-event match-event-${event.kind}`);
+    const key = [event.source, event.kind, event.minute, event.added_time || 0, event.side, event.increment || 0].join(":");
+    const isNew = matchEventSnapshot.id !== item.public_id || !matchEventSnapshot.keys.has(key);
+    currentKeys.add(key);
+    const row = element("li", `match-event match-event-${event.kind} match-event-${event.side}${isNew ? " match-event-new" : ""}`);
+    row.setAttribute("data-side", event.side === "away" ? "away" : "home");
+    row.style.setProperty("--event-index", String(index));
     row.setAttribute("aria-label", event.kind === "shot"
       ? `${minute}: aumento detectado de ${event.increment} ${shotWord} de ${team} entre actualizaciones.`
       : `${minute}: ${type.label.toLowerCase()} de ${team}.`);
-    row.append(element("strong", "match-event-minute", minute), element("span", "match-event-marker"), element("span", "match-event-icon", type.icon), element("span", "match-event-copy", copy));
+    const pin = element("span", "match-event-pin");
+    pin.setAttribute("aria-hidden", "true");
+    pin.append(element("span", "match-event-marker"), element("span", "match-event-icon", type.icon));
+    row.append(element("strong", "match-event-minute", minute), pin, element("span", "match-event-copy", copy));
     matchEvents.append(row);
   }
+  matchEventSnapshot = { id: item.public_id, keys: currentKeys };
 }
 
 function renderMatrixTeams(item, available) {

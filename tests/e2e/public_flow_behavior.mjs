@@ -304,6 +304,11 @@ test("verified events show chronological local/away match moments and safe crest
   assert.match(events.textContent, /8'.*Gol.*Alpha.*29\+2'.*Tarjeta amarilla.*Away.*61'.*Tarjeta roja.*Away/);
   assert.equal(events.children.length, 3);
   assert.equal(events.children[0].attributes["aria-label"], "8': gol de Alpha.");
+  assert.match(events.children[0].className, /match-event-home/);
+  assert.equal(events.children[0].attributes["data-side"], "home");
+  assert.equal(events.children[1].attributes["data-side"], "away");
+  assert.match(events.children[0].children[1].className, /match-event-pin/);
+  assert.match(events.children[0].children[2].className, /match-event-copy/);
   const walk = node => [node, ...node.children.flatMap(walk)];
   const matrixImage = walk(h.nodes.get("#matrix-teams")).find(node => node.tagName === "img");
   assert.ok(matrixImage?.src?.startsWith("https://imagecache.365scores.com/"));
@@ -356,6 +361,11 @@ test("selected live match exposes broadcast badges and motion hooks", async () =
   assert.equal(h.nodes.get(".analytics").dataset.liveState, "live");
   assert.match(h.nodes.get("#match-detail").textContent, /EN VIVO/);
   assert.match(h.nodes.get("#match-detail").children[1].children[1].className, /score-live/);
+  const score = h.nodes.get("#match-detail").children[1].children[1];
+  assert.equal(score.children[0].className, "score-value score-home");
+  assert.equal(score.children[1].className, "score-separator");
+  assert.equal(score.children[2].className, "score-value score-away");
+  assert.equal(score.children[3].tagName, "small");
 });
 
 test("history retry works, invalid UUID never fetches, detail/list timeouts stay isolated", async () => {
@@ -424,7 +434,7 @@ test("20s polling updates selected score and 1X2 before history without clearing
   assert.equal(h.nodes.get("#team-stats").textContent, statsBefore);
   detail.resolve({ item: { ...summary(A), score_home: 2, score_away: 1, minute: 65, probabilities: { home: 80.125, draw: 10, away: 9.875 } }, data_status: "fresh", model_version: "poll-model" });
   await h.flush();
-  assert.match(h.nodes.get("#match-detail").textContent, /2—1.*65'.*Alpha 80\s*\.13\s*%.*Empate 10\s*\.00\s*%.*Away 9\s*\.88\s*%/);
+  assert.match(h.nodes.get("#match-detail").textContent, /2\s*—\s*1.*65'.*Alpha 80\s*\.13\s*%.*Empate 10\s*\.00\s*%.*Away 9\s*\.88\s*%/);
   assert.match(h.nodes.get("#match-detail").children[1].children[1].className, /value-changed/);
   assert.match(h.nodes.get("#match-detail").children[2].children[0].children[1].className, /value-changed/);
   const refreshedHistory = h.requests.at(-1);

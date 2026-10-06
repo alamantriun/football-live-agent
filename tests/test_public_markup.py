@@ -75,6 +75,23 @@ def test_live_scenarios_precede_probability_matrix_and_product_hero_has_live_mot
     assert "@keyframes product-signal-scan" in site_css
 
 
+def test_live_timeline_and_scoreline_have_stable_visual_hooks():
+    html = (PUBLIC / "app" / "index.html").read_text(encoding="utf-8")
+    javascript = (PUBLIC / "app" / "app.js").read_text(encoding="utf-8")
+    css = (PUBLIC / "app" / "app.css").read_text(encoding="utf-8")
+
+    assert 'class="match-events"' in html
+    assert 'element("div", "scoreline")' in javascript
+    assert "match-event-pin" in javascript
+    assert "match-event-new" in javascript
+    assert "score-value score-home" in javascript
+    assert ".match-events::before" in css
+    assert ".match-event-away .match-event-copy" in css
+    assert "@keyframes timeline-event-in" in css
+    assert ".score-separator" in css
+    assert "prefers-reduced-motion" in css
+
+
 def test_landing_demo_uses_real_arsenal_and_chelsea_crests():
     html = (PUBLIC / "index.html").read_text(encoding="utf-8")
     app_javascript = (PUBLIC / "app" / "app.js").read_text(encoding="utf-8")
