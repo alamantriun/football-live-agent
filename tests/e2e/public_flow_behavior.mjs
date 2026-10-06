@@ -377,6 +377,12 @@ test("selected live match omits internal reading context copy", async () => {
   assert.doesNotMatch(detail, /Tasas ajustadas con resultados locales|Decimales: simulación visual/);
 });
 
+test("1X2 heading uses the centered visual hook", async () => {
+  const h = await harness(); await selected(h);
+  const probabilities = h.nodes.get("#match-detail").children[2].children[0];
+  assert.equal(probabilities.children[0].className, "probabilities-title");
+});
+
 test("history retry works, invalid UUID never fetches, detail/list timeouts stay isolated", async () => {
   const h = await harness(); const count = h.requests.length;
   await h.api.loadMatch("not-a-uuid"); assert.equal(h.requests.length, count);

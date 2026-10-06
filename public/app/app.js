@@ -285,7 +285,7 @@ function renderDetail(item) {
   const away = element("div", "club away"); away.append(element("span", "", item.away_name), clubMark(item.away_name, item.away_logo_url));
   scoreline.append(home, score, away);
   const grid = element("div", "detail-grid");
-  const probabilities = element("section", "surface"); probabilities.append(element("h3", "", "Probabilidades 1X2"));
+  const probabilities = element("section", "surface"); probabilities.append(element("h3", "probabilities-title", "Probabilidades 1X2"));
   const values = item.probabilities || {};
   probabilities.append(probabilityCard(item.home_name, values.home, detailChanged.probabilities.home), probabilityCard("Empate", values.draw, detailChanged.probabilities.draw), probabilityCard(item.away_name, values.away, detailChanged.probabilities.away));
   grid.append(probabilities); detail.append(top, scoreline, grid);

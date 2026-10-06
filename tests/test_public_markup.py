@@ -106,6 +106,14 @@ def test_live_detail_hides_internal_reading_context_and_visual_decimal_note():
     assert "Observado: ${item.provider_observed_at" not in javascript
 
 
+def test_probability_heading_has_a_dedicated_centered_style_hook():
+    javascript = (PUBLIC / "app" / "app.js").read_text(encoding="utf-8")
+    css = (PUBLIC / "app" / "app.css").read_text(encoding="utf-8")
+
+    assert 'element("h3", "probabilities-title", "Probabilidades 1X2")' in javascript
+    assert ".probabilities-title{text-align:center}" in css
+
+
 def test_landing_demo_uses_real_arsenal_and_chelsea_crests():
     html = (PUBLIC / "index.html").read_text(encoding="utf-8")
     app_javascript = (PUBLIC / "app" / "app.js").read_text(encoding="utf-8")

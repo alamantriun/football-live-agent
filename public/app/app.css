@@ -175,3 +175,4 @@
 @keyframes live-page-enter{from{opacity:0;transform:translateY(.7rem)}to{opacity:1;transform:none}}
 @keyframes live-section-reveal{from{opacity:0;transform:translateY(.65rem)}to{opacity:1;transform:none}}
 @media(prefers-reduced-motion:reduce){.live-page .app-hero,.live-page .data-status,.live-page .workspace,.live-page .analytics,.live-page .analytics-flow>section:not([hidden]){animation:none}.live-page .match-panel,.live-page .match-detail,.live-page .match-button,.live-page .panel-title button,.live-page .analytics-retry{transition:none}.live-page .match-panel:hover,.live-page .match-detail:hover,.live-page .match-button:hover,.live-page .panel-title button:hover,.live-page .analytics-retry:hover{transform:none}}
+.probabilities-title{text-align:center}
