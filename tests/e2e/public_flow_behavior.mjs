@@ -259,6 +259,19 @@ test("both teams to score uses an accessible visual instead of generic market ro
   assert.doesNotMatch(h.nodes.get("#market-probabilities").textContent, /Ambos marcan/);
 });
 
+test("scenario probabilities render as dedicated visual panels without changing published values", async () => {
+  const h = await harness(); await selected(h);
+
+  assert.match(String(h.nodes.get("#next-goal").className), /scenario-cards/);
+  assert.match(String(h.nodes.get("#market-probabilities").className), /goal-line-meter/);
+  assert.match(String(h.nodes.get("#goals-distribution").className), /goal-histogram/);
+  assert.match(String(h.nodes.get("#scorelines").className), /score-ranking/);
+  assert.match(h.nodes.get("#next-goal").textContent, /Local.*25\s*\.13.*Sin más goles.*0\s*\.00.*Visitante.*74\s*\.88/);
+  assert.match(h.nodes.get("#market-probabilities").textContent, /Más de 2,5 goles.*30\s*\.00.*Menos de 2,5 goles.*70\s*\.00/);
+  assert.match(h.nodes.get("#goals-distribution").textContent, /0.*0\s*\.00.*7\+.*25\s*\.13/);
+  assert.match(h.nodes.get("#scorelines").textContent, /1.*2—1.*25\s*\.13.*2.*0—0.*0\s*\.00/);
+});
+
 test("visual decimal motion keeps the published probability available to assistive technology", async () => {
   const h = await harness(); await selected(h);
   const walk = node => [node, ...node.children.flatMap(walk)];

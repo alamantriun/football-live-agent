@@ -34,6 +34,39 @@
 .analysis-rows{list-style:none;margin:1rem 0 0;padding:0}
 .analysis-rows dt,.analysis-rows li{margin-top:.85rem;overflow-wrap:anywhere}
 .analysis-rows dd{color:var(--muted);margin:.25rem 0 .85rem}
+.scenario-cards{display:grid;gap:.7rem;grid-template-columns:repeat(3,minmax(0,1fr));margin-top:1rem}
+.scenario-card{align-items:center;background:linear-gradient(145deg,rgb(255 255 255 / .06),rgb(255 255 255 / .015));display:grid;gap:.38rem;grid-template-columns:2.85rem minmax(0,1fr);min-height:5.75rem;padding:.75rem;position:relative;transition:background .25s ease,transform .25s ease}
+.scenario-card:hover{background:linear-gradient(145deg,rgb(223 255 84 / .16),rgb(255 255 255 / .04));transform:translateY(-.16rem)}
+.scenario-card.is-leading{box-shadow:inset 0 2px 0 var(--lime)}
+.scenario-card-label{font-size:.72rem;font-weight:850;grid-column:2;letter-spacing:.035em;line-height:1.12;text-transform:uppercase}
+.scenario-orbit{background:conic-gradient(var(--lime) var(--percent,0%),rgb(255 255 255 / .11) 0);border-radius:50%;grid-column:1;grid-row:1 / span 2;height:2.5rem;padding:.27rem;width:2.5rem}
+.scenario-orbit::after{background:var(--green);border-radius:inherit;content:"";display:block;height:100%;width:100%}
+.scenario-card-value{color:var(--white);font-size:1.08rem;grid-column:2;line-height:1}
+.scenario-card-leader{color:var(--lime);font-size:.61rem;font-weight:850;grid-column:1 / -1;letter-spacing:.08em;text-transform:uppercase}
+.goal-line-meter{display:grid;gap:.75rem;grid-template-columns:1fr 1fr;margin-top:1rem}
+.goal-line-track{background:linear-gradient(90deg,var(--lime) 0 var(--over,0%),var(--yellow) var(--over,0%) 100%);grid-column:1 / -1;height:.85rem;position:relative}
+.goal-line-track::after{background:var(--green);content:"";height:1.35rem;left:50%;position:absolute;top:50%;transform:translate(-50%,-50%);width:2px}
+.goal-line-number{background:var(--green);color:var(--white);font-size:.7rem;font-weight:900;left:50%;padding:.16rem .35rem;position:absolute;top:50%;transform:translate(-50%,-50%)}
+.goal-line-option{display:grid;gap:.28rem;min-width:0}
+.goal-line-option.is-under{text-align:right}
+.goal-line-label{color:var(--muted);font-size:.78rem;font-weight:800;line-height:1.15}
+.goal-line-value{color:var(--white);font-size:1.2rem}
+.goal-line-option.is-over .goal-line-value .probability-visual-decimal{color:var(--lime)}
+.goal-line-option.is-under .goal-line-value .probability-visual-decimal{color:var(--yellow)}
+.goal-histogram{align-items:end;display:grid;gap:.45rem;grid-template-columns:repeat(auto-fit,minmax(2.55rem,1fr));margin-top:1rem;min-height:13rem}
+.goal-column{align-items:center;display:grid;gap:.42rem;grid-template-rows:auto auto 8rem;justify-items:center;min-width:0}
+.goal-column-value{color:var(--white);font-size:.8rem;white-space:nowrap}
+.goal-column-fill{align-self:end;background:linear-gradient(180deg,var(--yellow),var(--lime));height:max(.35rem,var(--percent,0%));max-height:100%;transition:filter .6s ease,height .6s ease;width:100%}
+.goal-column.is-leading .goal-column-fill{box-shadow:0 0 1.1rem rgb(223 255 84 / .45)}
+.goal-column-label{color:var(--white);font-size:.82rem;font-weight:900}
+.score-ranking{display:grid;gap:.6rem;margin-top:1rem}
+.score-rank{align-items:center;background:linear-gradient(90deg,rgb(223 255 84 / .1) 0 var(--percent,0%),rgb(255 255 255 / .025) var(--percent,0%) 100%);display:grid;gap:.65rem;grid-template-columns:1.6rem minmax(0,1fr) auto;margin:0!important;min-height:3.3rem;padding:.55rem .7rem;transition:background .4s ease,transform .25s ease}
+.score-rank:hover{transform:translateX(.18rem)}
+.score-rank.is-leading{box-shadow:inset 3px 0 0 var(--lime)}
+.score-rank-number{color:var(--lime);font-size:.74rem;font-weight:900}
+.score-rank-score{color:var(--white);font-size:1.05rem;font-weight:850}
+.score-rank-probability{background:rgb(1 13 9 / .62);color:var(--white);font-size:.88rem;padding:.28rem .4rem;white-space:nowrap}
+@media(max-width:34rem){.scenario-cards{grid-template-columns:1fr}.scenario-card{grid-template-columns:3.1rem minmax(0,1fr)}.goal-histogram{gap:.3rem;grid-template-columns:repeat(4,minmax(2.15rem,1fr))}.score-rank{grid-template-columns:1.35rem minmax(0,1fr) auto;padding:.5rem}.score-rank-score{font-size:.94rem}}
 .probability-visual-value{display:inline-block;font-variant-numeric:tabular-nums}
 .probability-visual-decimal{color:var(--lime);display:inline-block;min-width:2.15ch;animation:decimal-breathe 1.8s ease-in-out infinite;transition:color .25s ease,transform .25s ease}
 .probability-suffix{color:var(--white)}

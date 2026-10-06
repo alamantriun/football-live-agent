@@ -456,6 +456,93 @@ function percentageRow(target, label, value, ordered = false) {
   }
 }
 
+function scenarioValue(value) {
+  return Math.max(0, Math.min(100, Number(value)));
+}
+
+function leadingScenarioIndex(rows) {
+  let leading = -1;
+  let highest = -Infinity;
+  rows.forEach((row, index) => {
+    if (Number.isFinite(row.value) && row.value > highest) {
+      highest = row.value;
+      leading = index;
+    }
+  });
+  return leading;
+}
+
+function renderNextGoalCards(target, values) {
+  target.className = "analysis-rows scenario-cards scenario-cards-three";
+  const leading = leadingScenarioIndex(values);
+  values.forEach((entry, index) => {
+    const available = Number.isFinite(entry.value);
+    const value = available ? scenarioValue(entry.value) : 0;
+    const card = element("div", `scenario-card${index === leading ? " is-leading" : ""}`);
+    const orbit = element("span", "scenario-orbit");
+    orbit.setAttribute("aria-hidden", "true");
+    orbit.style.setProperty("--percent", `${value}%`);
+    const valueNode = element("strong", "scenario-card-value");
+    valueNode.append(available ? visualProbability(value, "scenario") : element("span", "", "—"));
+    card.append(element("span", "scenario-card-label", entry.label), orbit, valueNode);
+    if (index === leading) card.append(element("span", "scenario-card-leader", "Lectura líder"));
+    target.append(card);
+  });
+}
+
+function renderGoalLineMeter(target, values) {
+  target.className = "analysis-rows goal-line-meter";
+  const [over, under] = values;
+  const overValue = Number.isFinite(over.value) ? scenarioValue(over.value) : 0;
+  const track = element("div", "goal-line-track");
+  track.setAttribute("aria-hidden", "true");
+  track.style.setProperty("--over", `${overValue}%`);
+  const line = element("span", "goal-line-number", "2.5");
+  line.setAttribute("aria-hidden", "true");
+  track.append(line);
+  target.append(track);
+  values.forEach((entry, index) => {
+    const available = Number.isFinite(entry.value);
+    const row = element("div", `goal-line-option ${index === 0 ? "is-over" : "is-under"}`);
+    const valueNode = element("strong", "goal-line-value");
+    valueNode.append(available ? visualProbability(scenarioValue(entry.value), "scenario") : element("span", "", "Dato no disponible"));
+    row.append(element("span", "goal-line-label", entry.label), valueNode);
+    target.append(row);
+  });
+}
+
+function renderGoalHistogram(target, rows) {
+  target.className = "analysis-rows goal-histogram";
+  const leading = leadingScenarioIndex(rows.map(row => ({ value: row.probability })));
+  rows.forEach((row, index) => {
+    const available = Number.isFinite(row.probability);
+    const value = available ? scenarioValue(row.probability) : 0;
+    const column = element("div", `goal-column${index === leading ? " is-leading" : ""}`);
+    const fill = element("span", "goal-column-fill");
+    fill.setAttribute("aria-hidden", "true");
+    fill.style.setProperty("--percent", `${value}%`);
+    const valueNode = element("strong", "goal-column-value");
+    valueNode.append(available ? visualProbability(value, "scenario") : element("span", "", "—"));
+    column.append(element("span", "goal-column-label", row.label), valueNode, fill);
+    target.append(column);
+  });
+}
+
+function renderScoreRanking(target, rows) {
+  target.className = "analysis-rows score-ranking";
+  const leading = leadingScenarioIndex(rows.map(row => ({ value: row.probability })));
+  rows.forEach((row, index) => {
+    const available = Number.isFinite(row.probability);
+    const value = available ? scenarioValue(row.probability) : 0;
+    const item = element("li", `score-rank${index === leading ? " is-leading" : ""}`);
+    item.style.setProperty("--percent", `${value}%`);
+    const probability = element("strong", "score-rank-probability");
+    probability.append(available ? visualProbability(value, "scenario") : element("span", "", "—"));
+    item.append(element("span", "score-rank-number", String(index + 1)), element("span", "score-rank-score", `${row.home}—${row.away}`), probability);
+    target.append(item);
+  });
+}
+
 function probabilityLabel(value) {
   return `${Number(value).toFixed(2)}%`;
 }
@@ -595,17 +682,17 @@ function renderScenarios(analytics, dataStatus, modelVersion, matchId, item) {
   scenarioMarkets.hidden = !nextAvailable && !marketsAvailable;
   nextGoal.parentElement.hidden = !nextAvailable; marketProbabilities.parentElement.hidden = !marketsAvailable;
   scenarioMarkets.setAttribute("aria-label", `Escenarios experimentales del modelo ${modelVersion ?? "Dato no disponible"} · Datos ${dataStatus ?? "Dato no disponible"}`);
-  if (nextAvailable) for (const [key, label] of [["home", "Local"], ["none", "Sin más goles"], ["away", "Visitante"]]) percentageRow(nextGoal, label, analytics.next_goal[key]);
+  if (nextAvailable) renderNextGoalCards(nextGoal, [["home", "Local"], ["none", "Sin más goles"], ["away", "Visitante"]].map(([key, label]) => ({ label, value: analytics.next_goal[key] })));
   renderBtts(analytics.markets?.btts_yes, analytics.markets?.btts_no, bttsAvailable);
-  if (marketsAvailable) for (const [key, label] of [["over_2_5", "Más de 2,5 goles"], ["under_2_5", "Menos de 2,5 goles"]]) percentageRow(marketProbabilities, label, analytics.markets[key]);
+  if (marketsAvailable) renderGoalLineMeter(marketProbabilities, [["over_2_5", "Más de 2,5 goles"], ["under_2_5", "Menos de 2,5 goles"]].map(([key, label]) => ({ label, value: analytics.markets[key] })));
   const totals = allowed && Array.isArray(analytics.total_goals) ? analytics.total_goals : [];
   const scores = allowed && Array.isArray(analytics.scorelines) ? analytics.scorelines : [];
   const matrix = allowed && Array.isArray(analytics.score_matrix) ? analytics.score_matrix : [];
   goalsDistribution.hidden = !totals.length; goalsDistribution.parentElement.hidden = !totals.length;
   scorelines.hidden = !scores.length; scorelines.parentElement.hidden = !scores.length;
   goalsDistribution.parentElement.parentElement.hidden = !totals.length && !scores.length;
-  for (const row of totals) percentageRow(goalsDistribution, row.label, row.probability);
-  for (const row of scores) percentageRow(scorelines, `${row.home}—${row.away}`, row.probability, true);
+  if (totals.length) renderGoalHistogram(goalsDistribution, totals);
+  if (scores.length) renderScoreRanking(scorelines, scores);
   renderMatrixTeams(item, matrix.length > 0);
   renderScoreMatrix(matrix, matchId);
   if (!allowed) return `Datos ${dataStatus ?? "no disponibles"}: los escenarios están ocultos por la antigüedad o suspensión de la lectura.`;
