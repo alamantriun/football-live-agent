@@ -159,7 +159,9 @@ test("null differs from zero, exact scenarios and historical gaps are rendered w
   assert.match(matrixTeams.attributes["aria-label"], /Local: Alpha.*Visitante: Away/);
   const matrixSection = h.nodes.get("#score-matrix").parentElement;
   assert.equal(matrixSection.children[matrixSection.children.indexOf(matrixTeams) + 1], h.nodes.get("#score-matrix"));
-  assert.equal(h.nodes.get("#score-matrix").parentElement.parentElement.children[0], h.nodes.get("#score-matrix").parentElement, "the score matrix leads the live analysis");
+  const analysisFlow = h.nodes.get("#score-matrix").parentElement.parentElement;
+  assert.equal(analysisFlow.children[0], h.nodes.get("#scenario-markets"), "scenario markets lead the live analysis");
+  assert.equal(analysisFlow.children[2], h.nodes.get("#score-matrix").parentElement, "the score matrix follows the scenario panels");
   assert.match(h.nodes.get("#analytics-evidence").textContent, /fresh.*fresh.*envelope-v5.*2026-10-05/);
   assert.equal(h.nodes.get("#probability-summary").textContent, "Evolución de las probabilidades publicadas.");
   assert.equal(h.nodes.get("#activity-summary").textContent, "Actividad observada durante el partido.");

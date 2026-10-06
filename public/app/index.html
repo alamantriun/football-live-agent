@@ -29,6 +29,28 @@
         <p id="analytics-status" role="status" aria-live="polite" hidden>Selecciona un partido para consultar su historial.</p>
         <button id="analytics-retry" class="analytics-retry" type="button" hidden>Reintentar análisis</button>
         <div class="analytics-flow">
+          <section id="scenario-markets" class="analysis-split" aria-label="Escenarios del modelo" hidden>
+            <section aria-labelledby="next-goal-heading">
+              <h3 id="next-goal-heading">Próximo gol</h3>
+              <p class="muted">Escenario experimental del modelo.</p>
+              <dl id="next-goal" class="analysis-rows"><dt>Lectura</dt><dd>Dato no disponible</dd></dl>
+            </section>
+            <section aria-labelledby="markets-heading">
+              <h3 id="markets-heading">Más o menos de 2,5 goles</h3>
+              <p class="muted">Escenarios del modelo · más/menos de 2,5 goles.</p>
+              <dl id="market-probabilities" class="analysis-rows"><dt>Lectura</dt><dd>Dato no disponible</dd></dl>
+            </section>
+          </section>
+          <div class="analysis-split" hidden>
+            <section aria-labelledby="goals-heading">
+              <h3 id="goals-heading">Distribución de goles totales</h3>
+              <dl id="goals-distribution" class="analysis-rows" hidden><dt>Lectura</dt><dd>Dato no disponible</dd></dl>
+            </section>
+            <section aria-labelledby="scorelines-heading">
+              <h3 id="scorelines-heading">Marcadores más probables</h3>
+              <ol id="scorelines" class="analysis-rows" hidden><li>Dato no disponible</li></ol>
+            </section>
+          </div>
           <section aria-labelledby="score-matrix-heading" hidden>
             <h3 id="score-matrix-heading">Matriz probabilística · vista Monte Carlo</h3>
             <p id="score-matrix-summary" class="muted">Probabilidad de cada marcador final. Local en filas y visitante en columnas; 6+ agrupa la cola.</p>
@@ -70,28 +92,6 @@
             <p id="activity-summary" class="muted">Índice experimental. Dato no disponible; no representa una probabilidad validada.</p>
             <canvas id="activity-chart" role="img" aria-label="Series de actividad observada y momentum de ambos equipos" aria-describedby="activity-summary" hidden>Dato no disponible. Consulta el resumen de actividad observada.</canvas>
           </section>
-          <section id="scenario-markets" class="analysis-split" aria-label="Escenarios del modelo" hidden>
-            <section aria-labelledby="next-goal-heading">
-              <h3 id="next-goal-heading">Próximo gol</h3>
-              <p class="muted">Escenario experimental del modelo.</p>
-              <dl id="next-goal" class="analysis-rows"><dt>Lectura</dt><dd>Dato no disponible</dd></dl>
-            </section>
-            <section aria-labelledby="markets-heading">
-              <h3 id="markets-heading">Más o menos de 2,5 goles</h3>
-              <p class="muted">Escenarios del modelo · más/menos de 2,5 goles.</p>
-              <dl id="market-probabilities" class="analysis-rows"><dt>Lectura</dt><dd>Dato no disponible</dd></dl>
-            </section>
-          </section>
-          <div class="analysis-split" hidden>
-            <section aria-labelledby="goals-heading">
-              <h3 id="goals-heading">Distribución de goles totales</h3>
-              <dl id="goals-distribution" class="analysis-rows" hidden><dt>Lectura</dt><dd>Dato no disponible</dd></dl>
-            </section>
-            <section aria-labelledby="scorelines-heading">
-              <h3 id="scorelines-heading">Marcadores más probables</h3>
-              <ol id="scorelines" class="analysis-rows" hidden><li>Dato no disponible</li></ol>
-            </section>
-          </div>
           <footer id="analytics-evidence" class="analytics-evidence" aria-label="Evidencia y calidad de la lectura" hidden>
             <p>Cobertura, calidad, modelo y hora de observación: dato no disponible.</p>
           </footer>

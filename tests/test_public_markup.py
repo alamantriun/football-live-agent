@@ -49,6 +49,18 @@ def test_motion_is_scoped_to_product_and_live_match_pages():
     assert "prefers-reduced-motion" in site_css and "prefers-reduced-motion" in app_css
 
 
+def test_live_scenarios_precede_probability_matrix_and_product_hero_has_live_motion():
+    live = (PUBLIC / "app" / "index.html").read_text(encoding="utf-8")
+    site_css = (PUBLIC / "assets" / "site.css").read_text(encoding="utf-8")
+
+    assert live.index('id="scenario-markets"') < live.index('id="score-matrix-heading"')
+    assert live.index('id="goals-distribution"') < live.index('id="score-matrix-heading"')
+    assert ".product-page .hero::before" in site_css
+    assert ".product-page .radar::after" in site_css
+    assert "@keyframes product-radar-sweep" in site_css
+    assert "@keyframes product-signal-scan" in site_css
+
+
 def test_landing_demo_uses_real_arsenal_and_chelsea_crests():
     html = (PUBLIC / "index.html").read_text(encoding="utf-8")
     app_javascript = (PUBLIC / "app" / "app.js").read_text(encoding="utf-8")

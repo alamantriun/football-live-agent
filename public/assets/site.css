@@ -17,3 +17,13 @@
 @keyframes product-visual-drift{from{transform:translate3d(0,.2rem,0)}to{transform:translate3d(0,-.45rem,0)}}
 @keyframes signal-card-pulse{0%,100%{box-shadow:0 0 0 rgba(223,255,84,0)}50%{box-shadow:0 0 1.2rem rgba(223,255,84,.18)}}
 @media(prefers-reduced-motion:reduce){.product-page .hero,.product-page .hero-visual,.product-page .signal-card{animation:none}.product-page .reading-statement,.product-page .evidence-panel,.product-page .match-reading,.product-page .method-grid article{transition:none}.product-page .reading-statement:hover,.product-page .evidence-panel:hover,.product-page .match-reading:hover,.product-page .method-grid article:hover{transform:none}}
+.product-page .hero::before{background:radial-gradient(circle at 62% 42%,rgba(223,255,84,.13),transparent 32%),radial-gradient(circle at 76% 70%,rgba(255,217,77,.09),transparent 30%);content:"";inset:0;pointer-events:none;position:absolute;animation:product-signal-scan 9s ease-in-out infinite;z-index:0}
+.product-page .hero h1 em{animation:product-em-glow 3.8s ease-in-out infinite}
+.product-page .hero .kicker>span{animation:product-kicker-pulse 2.4s ease-in-out infinite}
+.product-page .radar{isolation:isolate;overflow:hidden}
+.product-page .radar::after{background:conic-gradient(from 0deg,transparent 0 72%,rgba(223,255,84,.38) 84%,transparent 92%);border-radius:50%;content:"";inset:-6%;pointer-events:none;position:absolute;animation:product-radar-sweep 5s linear infinite;z-index:2}
+@keyframes product-signal-scan{0%,100%{opacity:.65;transform:scale(1)}50%{opacity:1;transform:scale(1.08)}}
+@keyframes product-em-glow{0%,100%{filter:brightness(1);text-shadow:0 0 0 rgba(223,255,84,0)}50%{filter:brightness(1.2);text-shadow:0 0 1.1rem rgba(223,255,84,.32)}}
+@keyframes product-kicker-pulse{0%,100%{box-shadow:0 0 0 rgba(255,217,77,0);transform:scale(.9)}50%{box-shadow:0 0 .65rem rgba(255,217,77,.55);transform:scale(1.08)}}
+@keyframes product-radar-sweep{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.product-page .hero::before,.product-page .hero h1 em,.product-page .hero .kicker>span,.product-page .radar::after{animation:none}}
