@@ -36,12 +36,16 @@
             <div id="score-matrix" class="score-matrix" role="table" aria-label="Matriz de probabilidades de marcadores posibles" aria-describedby="score-matrix-summary" hidden></div>
           </section>
           <section id="btts-section" aria-labelledby="btts-heading" hidden>
-            <h3 id="btts-heading">Ambos equipos marcan</h3>
-            <p class="muted">Escenario del modelo. Los decimales que se mueven son un efecto visual; el valor base publicado conserva la lectura real.</p>
+            <h3 id="btts-heading">¿Anotan ambos equipos?</h3>
             <div id="btts-visual" class="btts-visual" role="img" aria-label="Dato no disponible" hidden>
               <span id="btts-ring" class="btts-ring" aria-hidden="true"><strong id="btts-ring-value">—</strong></span>
-              <span class="btts-copy"><small>Probabilidad publicada</small><strong id="btts-yes">Sí —</strong><span id="btts-no">No —</span></span>
+              <span class="btts-copy"><small>Probabilidad publicada</small><strong id="btts-yes">Sí, ambos marcan —</strong><span id="btts-no">No, uno se queda sin marcar —</span></span>
             </div>
+          </section>
+          <section id="match-events-section" aria-labelledby="match-events-heading" hidden>
+            <h3 id="match-events-heading">Momentos del partido</h3>
+            <p class="muted">Eventos verificados por el proveedor.</p>
+            <ol id="match-events" class="match-events" aria-live="polite"></ol>
           </section>
           <section aria-labelledby="probability-heading" hidden>
             <h3 id="probability-heading">Historial de probabilidades</h3>

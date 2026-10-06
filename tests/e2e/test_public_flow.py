@@ -21,7 +21,7 @@ def test_dashboard_history_contract_and_responsive_styles():
     javascript = (APP / "app.js").read_text(encoding="utf-8")
     assert 'from "./charts.js"' in javascript
     assert '"/history?limit=90"' in javascript
-    for name in ("loadHistory", "renderAnalytics", "renderTeamStats", "renderScenarios", "renderAnalyticsState"):
+    for name in ("loadHistory", "renderAnalytics", "renderTeamStats", "renderScenarios", "renderMatchEvents", "renderAnalyticsState"):
         assert f"function {name}" in javascript
     for forbidden in ("innerHTML", "insertAdjacentHTML", "document.write", "eval("):
         assert forbidden not in javascript
@@ -96,9 +96,14 @@ def test_dashboard_includes_accessible_live_analysis_surfaces():
     for element_id in (
         "analytics-status", "probability-history", "team-stats",
         "activity-chart", "scenario-markets", "goals-distribution",
-        "scorelines", "score-matrix", "analytics-evidence",
+        "scorelines", "score-matrix", "match-events-section", "match-events", "analytics-evidence",
     ):
         assert element_id in elements
+    for element_id in (
+        "analytics-status", "probability-history", "team-stats",
+        "activity-chart", "scenario-markets", "goals-distribution",
+        "scorelines", "score-matrix", "match-events-section", "analytics-evidence",
+    ):
         assert "hidden" in elements[element_id][1]
     assert "score-matrix-summary" in elements
     assert elements["analytics-status"][1]["role"] == "status"
@@ -113,6 +118,12 @@ def test_dashboard_includes_accessible_live_analysis_surfaces():
     assert elements["score-matrix"][0] == "div"
     assert elements["score-matrix"][1]["role"] == "table"
     assert elements["score-matrix"][1]["aria-describedby"] == "score-matrix-summary"
+    assert elements["match-events"][0] == "ol"
+    assert elements["match-events"][1]["aria-live"] == "polite"
+    assert html.index('id="btts-section"') < html.index('id="match-events-section"') < html.index('id="probability-heading"')
+    assert "Momentos del partido" in html
+    assert "¿Anotan ambos equipos?" in html
+    assert "Escenario del modelo. Los decimales que se mueven" not in html
     assert 'type="module" src="/app/app.js"' in html
     for export in ("drawLineChart", "drawBarChart", "clearChart"):
         assert f"export function {export}" in javascript

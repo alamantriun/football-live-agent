@@ -25,7 +25,8 @@ class Node {
 }
 const A = "11111111-1111-4111-8111-111111111111";
 const B = "22222222-2222-4222-8222-222222222222";
-const summary = id => ({ public_id: id, home_name: id === A ? "Alpha" : "Beta", away_name: "Away", score_home: 0, score_away: 0, probabilities: { home: null, draw: 0, away: 50 } });
+const crest = team => `https://imagecache.365scores.com/image/upload/f_png,w_160,h_160,c_limit,q_auto:eco,dpr_2/d_Competitors:default1.png/v20/Competitors/${team}`;
+const summary = id => ({ public_id: id, home_name: id === A ? "Alpha" : "Beta", away_name: "Away", home_logo_url: crest(id === A ? 101 : 102), away_logo_url: crest(103), score_home: 0, score_away: 0, probabilities: { home: null, draw: 0, away: 50 } });
 const point = (minute, probabilities = { home: 25.125, draw: 0, away: 74.875 }) => ({
   minute, score_home: 0, score_away: 0, provider_observed_at: "2026-10-05T10:00:00Z",
   collected_at: null, quality: "fresh", stats: { shots: { home: 0, away: null }, possession: { home: 60, away: 40 } },
@@ -33,7 +34,11 @@ const point = (minute, probabilities = { home: 25.125, draw: 0, away: 74.875 }) 
 });
 const history = (id = A, state = "fresh", points = [point(1), point(2, null), point(3)]) => ({
   request_id: A, generated_at: "2026-10-05T10:00:00Z", data_status: state, model_version: "envelope-v5",
-  item: { ...summary(id), points, analytics: {
+  item: { ...summary(id), points, events: id === A ? [
+    { minute: 8, added_time: null, side: "home", kind: "goal" },
+    { minute: 29, added_time: 2, side: "away", kind: "yellow_card" },
+    { minute: 61, added_time: null, side: "away", kind: "red_card" },
+  ] : [], analytics: {
     activity: [{ minute: 1, observed_at: "t1", home: 60, away: 40 }, { minute: 2, observed_at: "t2", home: null, away: null }, { minute: 3, observed_at: "t3", home: 70, away: 30 }],
     momentum: [], next_goal: { home: 25.125, none: 0, away: 74.875 },
     markets: { over_2_5: 30, under_2_5: 70, btts_yes: 10, btts_no: 90 },
@@ -156,8 +161,8 @@ test("null differs from zero, exact scenarios and historical gaps are rendered w
   assert.equal(matrixSection.children[matrixSection.children.indexOf(matrixTeams) + 1], h.nodes.get("#score-matrix"));
   assert.equal(h.nodes.get("#score-matrix").parentElement.parentElement.children[0], h.nodes.get("#score-matrix").parentElement, "the score matrix leads the live analysis");
   assert.match(h.nodes.get("#analytics-evidence").textContent, /fresh.*fresh.*envelope-v5.*2026-10-05/);
-  assert.match(h.nodes.get("#probability-summary").textContent, /huecos|ausentes/i);
-  assert.match(h.nodes.get("#activity-summary").textContent, /Índice experimental/);
+  assert.equal(h.nodes.get("#probability-summary").textContent, "Evolución de las probabilidades publicadas.");
+  assert.equal(h.nodes.get("#activity-summary").textContent, "Actividad observada durante el partido.");
   const calls = h.nodes.get("#probability-history").calls;
   const start = calls.findIndex(c => c[0] === "strokeStyle" && c[1] === "#dfff54");
   assert.deepEqual(calls.slice(start).filter(c => ["moveTo", "lineTo"].includes(c[0])).map(c => c[0]), ["moveTo", "moveTo", "moveTo", "moveTo", "moveTo", "moveTo"]);
@@ -180,7 +185,7 @@ test("one/zero observations, absent scenarios, mismatched ID and resize never fa
   const h = await harness(); const payload = history(A, "degraded", [point(1, null)]);
   Object.assign(payload.item.analytics, { next_goal: null, markets: null, total_goals: [], scorelines: [], activity: [] });
   await selected(h, payload);
-  assert.match(h.nodes.get("#probability-summary").textContent, /observaci[oó]n.*tendencia/i);
+  assert.equal(h.nodes.get("#probability-summary").textContent, "Se necesitan al menos dos lecturas para mostrar una evolución.");
   assert.equal(h.nodes.get("#scenario-markets").hidden, true);
   assert.match(h.nodes.get("#analytics-status").textContent, /Dato no disponible/);
   const request = h.api.loadMatch(B); h.requests.at(-1).resolve({ item: summary(B) }); await h.flush();
@@ -249,8 +254,8 @@ test("both teams to score uses an accessible visual instead of generic market ro
   const h = await harness(); await selected(h);
   const visual = h.nodes.get("#btts-visual");
   assert.equal(visual?.hidden, false);
-  assert.match(visual?.textContent || "", /Sí\s*10\s*\.00\s*%.*No\s*90\s*\.00\s*%/);
-  assert.match(visual?.attributes["aria-label"] || "", /sí 10\.00%.*no 90\.00%/i);
+  assert.match(visual?.textContent || "", /Sí, ambos marcan\s*10\s*\.00\s*%.*No, uno se queda sin marcar\s*90\s*\.00\s*%/);
+  assert.match(visual?.attributes["aria-label"] || "", /sí, ambos marcan 10\.00%.*no, uno se queda sin marcar 90\.00%/i);
   assert.doesNotMatch(h.nodes.get("#market-probabilities").textContent, /Ambos marcan/);
 });
 
@@ -275,6 +280,29 @@ test("both teams to score is placed immediately after the Monte Carlo matrix", a
   const matrixIndex = flow.children.indexOf(h.nodes.get("#score-matrix").parentElement);
   assert.equal(flow.children[matrixIndex + 1], bttsSection);
   assert.equal(bttsSection.hidden, false);
+});
+
+test("verified events show chronological local/away match moments and safe crest fallback", async () => {
+  const h = await harness(); await selected(h);
+  const events = h.nodes.get("#match-events");
+  assert.equal(h.nodes.get("#match-events-section").hidden, false);
+  assert.match(events.textContent, /8'.*Gol.*Alpha.*29\+2'.*Tarjeta amarilla.*Away.*61'.*Tarjeta roja.*Away/);
+  assert.equal(events.children.length, 3);
+  assert.equal(events.children[0].attributes["aria-label"], "8': gol de Alpha.");
+  const walk = node => [node, ...node.children.flatMap(walk)];
+  const matrixImage = walk(h.nodes.get("#matrix-teams")).find(node => node.tagName === "img");
+  assert.ok(matrixImage?.src?.startsWith("https://imagecache.365scores.com/"));
+  matrixImage.listeners.error();
+  assert.match(h.nodes.get("#matrix-teams").textContent, /AL/);
+});
+
+test("event timeline clears rows for a newly selected match and states verified absence", async () => {
+  const h = await harness(); await selected(h);
+  assert.equal(h.nodes.get("#match-events").children.length, 3);
+  await selected(h, history(B));
+  assert.equal(h.nodes.get("#match-events-section").hidden, false);
+  assert.equal(h.nodes.get("#match-events").textContent, "Sin eventos verificables publicados todavía.");
+  assert.equal(h.nodes.get("#match-events").children.length, 1);
 });
 
 test("selected live match exposes broadcast badges and motion hooks", async () => {

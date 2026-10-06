@@ -61,6 +61,10 @@ const bttsRing = document.querySelector("#btts-ring");
 const bttsRingValue = document.querySelector("#btts-ring-value");
 const bttsYes = document.querySelector("#btts-yes");
 const bttsNo = document.querySelector("#btts-no");
+const matchEventsSection = document.querySelector("#match-events-section");
+const matchEvents = document.querySelector("#match-events");
+const probabilitySummary = document.querySelector("#probability-summary");
+const activitySummary = document.querySelector("#activity-summary");
 
 function setStatus(message, state) {
   status.textContent = message;
@@ -168,7 +172,7 @@ function clubMark(name, logoUrl) {
   image.loading = "lazy";
   image.width = 48;
   image.height = 48;
-  image.addEventListener("error", () => { image.remove(); mark.textContent = initials(name); });
+  image.addEventListener("error", () => { mark.textContent = initials(name); });
   mark.textContent = "";
   mark.append(image);
   return mark;
@@ -368,11 +372,13 @@ function resetAnalytics() {
   scenarioMarkets.hidden = true;
   bttsSection.hidden = true;
   bttsVisual.hidden = true;
-  bttsVisual.setAttribute("aria-label", "Ambos equipos marcan: dato no disponible.");
+  bttsVisual.setAttribute("aria-label", "¿Anotan ambos equipos?: dato no disponible.");
   bttsRing.style.setProperty("--yes", "0");
   bttsRingValue.textContent = "—";
-  bttsYes.textContent = "Sí —";
-  bttsNo.textContent = "No —";
+  bttsYes.textContent = "Sí, ambos marcan —";
+  bttsNo.textContent = "No, uno se queda sin marcar —";
+  matchEvents.replaceChildren();
+  matchEventsSection.hidden = true;
   clearVisualDecimals("scenario");
   clearVisualDecimals("matrix");
   for (const node of [nextGoal, marketProbabilities, goalsDistribution, scorelines, scoreMatrix]) node.replaceChildren();
@@ -458,7 +464,7 @@ function renderBtts(yes, no, available) {
   bttsVisual.hidden = !available;
   bttsSection.hidden = !available;
   if (!available) {
-    bttsVisual.setAttribute("aria-label", "Ambos equipos marcan: dato no disponible.");
+    bttsVisual.setAttribute("aria-label", "¿Anotan ambos equipos?: dato no disponible.");
     return;
   }
   const yesValue = Math.max(0, Math.min(100, Number(yes)));
@@ -467,9 +473,29 @@ function renderBtts(yes, no, available) {
   const noLabel = probabilityLabel(noValue);
   bttsRing.style.setProperty("--yes", String(yesValue));
   bttsRingValue.replaceChildren(visualProbability(yesValue, "scenario"));
-  bttsYes.replaceChildren(element("span", "", "Sí "), visualProbability(yesValue, "scenario"));
-  bttsNo.replaceChildren(element("span", "", "No "), visualProbability(noValue, "scenario"));
-  bttsVisual.setAttribute("aria-label", `Ambos equipos marcan: sí ${yesLabel}, no ${noLabel}.`);
+  bttsYes.replaceChildren(element("span", "", "Sí, ambos marcan "), visualProbability(yesValue, "scenario"));
+  bttsNo.replaceChildren(element("span", "", "No, uno se queda sin marcar "), visualProbability(noValue, "scenario"));
+  bttsVisual.setAttribute("aria-label", `¿Anotan ambos equipos?: sí, ambos marcan ${yesLabel}; no, uno se queda sin marcar ${noLabel}.`);
+}
+
+function renderMatchEvents(item) {
+  const labels = { goal: "Gol", yellow_card: "Tarjeta amarilla", red_card: "Tarjeta roja" };
+  const events = Array.isArray(item.events) ? item.events.filter(event => labels[event?.kind]) : [];
+  matchEvents.replaceChildren();
+  matchEventsSection.hidden = false;
+  if (!events.length) {
+    matchEvents.append(element("li", "match-event-empty", "Sin eventos verificables publicados todavía."));
+    return;
+  }
+  for (const event of events) {
+    const minute = `${event.minute}${Number.isInteger(event.added_time) && event.added_time > 0 ? `+${event.added_time}` : ""}'`;
+    const team = event.side === "away" ? item.away_name : item.home_name;
+    const kind = labels[event.kind];
+    const row = element("li", `match-event match-event-${event.kind}`);
+    row.setAttribute("aria-label", `${minute}: ${kind.toLowerCase()} de ${team}.`);
+    row.append(element("strong", "match-event-minute", minute), element("span", "match-event-marker"), element("span", "match-event-copy", `${kind} · ${team}`));
+    matchEvents.append(row);
+  }
 }
 
 function renderMatrixTeams(item, available) {
@@ -558,24 +584,24 @@ function renderCharts() {
   const probabilityTrend = series.some(row => row.values.filter(Number.isFinite).length >= 2);
   if (probabilityTrend) drawLineChart(probabilityCanvas, series, { min: 0, max: 100, labels: points.map(point => point.minute == null ? point.provider_observed_at : `${point.minute}'`) });
   else clearChart(probabilityCanvas, "Dato no disponible: se necesitan al menos dos observaciones válidas.");
-  const latest = points.at(-1)?.probabilities;
-  document.querySelector("#probability-summary").textContent = `${points.length} observaciones. ${probabilityTrend ? "Local, empate y visitante (%); los valores ausentes dejan huecos en la serie." : "Dato no disponible: una observación muestra estadísticas actuales, pero no basta para formar una tendencia."} Última lectura: ${["home", "draw", "away"].map(key => `${key === "home" ? "Local" : key === "draw" ? "Empate" : "Visitante"} ${Number.isFinite(latest?.[key]) ? `${latest[key]}%` : "Dato no disponible"}`).join(" · ")}`;
+  probabilitySummary.textContent = probabilityTrend
+    ? "Evolución de las probabilidades publicadas."
+    : "Se necesitan al menos dos lecturas para mostrar una evolución.";
   const trends = [];
-  const descriptions = [];
   for (const [key, label, colors] of [["activity", "Actividad observada", ["#dfff54", "#ffd94d"]], ["momentum", "Momentum", ["#ff9a85", "#9ecfff"]]]) {
     const values = Array.isArray(item.analytics?.[key]) ? item.analytics[key] : [];
     for (const [index, side] of ["home", "away"].entries()) {
       const samples = values.map(point => Number.isFinite(point[side]) ? point[side] : null);
       if (samples.filter(Number.isFinite).length >= 2) {
         trends.push({ label: `${label} ${side === "home" ? "local" : "visitante"}`, values: samples, color: colors[index] });
-        const latestValue = samples.at(-1);
-        descriptions.push(`${label} ${side === "home" ? "local" : "visitante"}: ${Number.isFinite(latestValue) ? latestValue : "Dato no disponible"}`);
-      } else descriptions.push(`${label} ${side === "home" ? "local" : "visitante"}: Dato no disponible`);
+      }
     }
   }
   if (trends.length) drawLineChart(activityCanvas, trends, { min: 0, max: 100 });
   else clearChart(activityCanvas, "Dato no disponible: faltan observaciones para una tendencia.");
-  document.querySelector("#activity-summary").textContent = `Índice experimental (0–100); no representa una probabilidad validada. ${descriptions.join(" · ")}. Los valores ausentes dejan huecos; momentum necesita cuatro puntos válidos de actividad.`;
+  activitySummary.textContent = trends.length
+    ? "Actividad observada durante el partido."
+    : "Aún no hay suficientes lecturas para mostrar actividad.";
 }
 
 function renderAnalytics(item, dataStatus, modelVersion) {
@@ -586,6 +612,7 @@ function renderAnalytics(item, dataStatus, modelVersion) {
   chartState = { item: { ...item, points }, dataStatus, modelVersion };
   for (const canvas of [probabilityCanvas, activityCanvas]) { canvas.hidden = false; canvas.parentElement.hidden = false; }
   renderTeamStats(points.at(-1), item.public_id);
+  renderMatchEvents(item);
   const scenarioMessage = renderScenarios(analytics, dataStatus, modelVersion, item.public_id, item);
   evidence.hidden = false;
   const coverage = analytics.coverage;
