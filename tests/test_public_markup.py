@@ -114,6 +114,15 @@ def test_probability_heading_has_a_dedicated_centered_style_hook():
     assert ".probabilities-title{text-align:center}" in css
 
 
+def test_probability_box_uses_a_centered_single_column_layout():
+    javascript = (PUBLIC / "app" / "app.js").read_text(encoding="utf-8")
+    css = (PUBLIC / "app" / "app.css").read_text(encoding="utf-8")
+
+    assert 'element("div", "detail-grid probabilities-layout")' in javascript
+    assert ".probabilities-layout{grid-template-columns:minmax(0,1fr);justify-items:center}" in css
+    assert ".probabilities-layout>.surface{width:min(100%,48rem)}" in css
+
+
 def test_landing_demo_uses_real_arsenal_and_chelsea_crests():
     html = (PUBLIC / "index.html").read_text(encoding="utf-8")
     app_javascript = (PUBLIC / "app" / "app.js").read_text(encoding="utf-8")
