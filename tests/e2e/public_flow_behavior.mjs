@@ -369,6 +369,14 @@ test("selected live match exposes broadcast badges and motion hooks", async () =
   assert.equal(score.children[3].tagName, "small");
 });
 
+test("selected live match omits internal reading context copy", async () => {
+  const h = await harness(); await selected(h, history(), { ...summary(A), status: "live", minute: 63 });
+  const detail = h.nodes.get("#match-detail").textContent;
+  assert.match(detail, /Probabilidades 1X2/);
+  assert.doesNotMatch(detail, /Contexto de la lectura|Calidad:|Modelo:|Observado:/);
+  assert.doesNotMatch(detail, /Tasas ajustadas con resultados locales|Decimales: simulación visual/);
+});
+
 test("history retry works, invalid UUID never fetches, detail/list timeouts stay isolated", async () => {
   const h = await harness(); const count = h.requests.length;
   await h.api.loadMatch("not-a-uuid"); assert.equal(h.requests.length, count);

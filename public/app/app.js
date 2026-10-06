@@ -288,12 +288,7 @@ function renderDetail(item) {
   const probabilities = element("section", "surface"); probabilities.append(element("h3", "", "Probabilidades 1X2"));
   const values = item.probabilities || {};
   probabilities.append(probabilityCard(item.home_name, values.home, detailChanged.probabilities.home), probabilityCard("Empate", values.draw, detailChanged.probabilities.draw), probabilityCard(item.away_name, values.away, detailChanged.probabilities.away));
-  const context = element("section", "surface"); context.append(element("h3", "", "Contexto de la lectura"));
-  const warnings = Array.isArray(item.explanation?.warnings) ? item.explanation.warnings : [];
-  context.append(element("p", "signal-summary", warnings[0] || "Dato no disponible: la explicación aún no fue publicada."));
-  const timeline = element("ul", "timeline");
-  timeline.append(element("li", "", `Calidad: ${item.data_status || "Dato no disponible"}`), element("li", "", `Modelo: ${item.model_version || "Dato no disponible"}`), element("li", "", `Observado: ${item.provider_observed_at || "Dato no disponible"}`));
-  context.append(timeline); grid.append(probabilities, context); detail.append(top, scoreline, grid);
+  grid.append(probabilities); detail.append(top, scoreline, grid);
 }
 
 async function loadMatch(id, options = {}) {

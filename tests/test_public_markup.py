@@ -93,6 +93,19 @@ def test_live_timeline_and_scoreline_have_stable_visual_hooks():
     assert "prefers-reduced-motion" in css
 
 
+def test_live_detail_hides_internal_reading_context_and_visual_decimal_note():
+    html = (PUBLIC / "app" / "index.html").read_text(encoding="utf-8")
+    javascript = (PUBLIC / "app" / "app.js").read_text(encoding="utf-8")
+
+    assert "Decimales: simulación visual" not in html
+    assert "visual-simulation-note" not in html
+    assert "Contexto de la lectura" not in javascript
+    assert "item.explanation?.warnings" not in javascript
+    assert "Calidad: ${item.data_status" not in javascript
+    assert "Modelo: ${item.model_version" not in javascript
+    assert "Observado: ${item.provider_observed_at" not in javascript
+
+
 def test_landing_demo_uses_real_arsenal_and_chelsea_crests():
     html = (PUBLIC / "index.html").read_text(encoding="utf-8")
     app_javascript = (PUBLIC / "app" / "app.js").read_text(encoding="utf-8")
