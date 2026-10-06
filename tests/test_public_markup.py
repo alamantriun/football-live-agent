@@ -84,6 +84,7 @@ def test_live_timeline_and_scoreline_have_stable_visual_hooks():
     assert 'element("div", "scoreline")' in javascript
     assert "match-event-pin" in javascript
     assert "match-event-new" in javascript
+    assert "right.minute - left.minute" in javascript
     assert "score-value score-home" in javascript
     assert ".match-events::before" in css
     assert ".match-event-away .match-event-copy" in css

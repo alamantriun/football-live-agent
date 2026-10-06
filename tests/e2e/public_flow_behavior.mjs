@@ -301,12 +301,12 @@ test("verified events show chronological local/away match moments and safe crest
   const h = await harness(); await selected(h);
   const events = h.nodes.get("#match-events");
   assert.equal(h.nodes.get("#match-events-section").hidden, false);
-  assert.match(events.textContent, /8'.*Gol.*Alpha.*29\+2'.*Tarjeta amarilla.*Away.*61'.*Tarjeta roja.*Away/);
+  assert.match(events.textContent, /61'.*Tarjeta roja.*Away.*29\+2'.*Tarjeta amarilla.*Away.*8'.*Gol.*Alpha/);
   assert.equal(events.children.length, 3);
-  assert.equal(events.children[0].attributes["aria-label"], "8': gol de Alpha.");
-  assert.match(events.children[0].className, /match-event-home/);
-  assert.equal(events.children[0].attributes["data-side"], "home");
-  assert.equal(events.children[1].attributes["data-side"], "away");
+  assert.equal(events.children[0].attributes["aria-label"], "61': tarjeta roja de Away.");
+  assert.match(events.children[0].className, /match-event-away/);
+  assert.equal(events.children[0].attributes["data-side"], "away");
+  assert.equal(events.children[2].attributes["data-side"], "home");
   assert.match(events.children[0].children[1].className, /match-event-pin/);
   assert.match(events.children[0].children[2].className, /match-event-copy/);
   const walk = node => [node, ...node.children.flatMap(walk)];
@@ -326,11 +326,12 @@ test("timeline uses incident symbols and detects shot increases between provider
   await selected(h, history(A, "fresh", points));
 
   const events = h.nodes.get("#match-events");
-  assert.match(events.textContent, /⚽.*Gol.*🟨.*Tarjeta amarilla.*🟥.*Tarjeta roja/);
-  assert.match(events.textContent, /Tiros detectados \+2.*Alpha.*Tiros detectados \+2.*Away/);
+  assert.match(events.textContent, /🟥.*Tarjeta roja.*🟨.*Tarjeta amarilla.*⚽.*Gol/);
+  assert.match(events.textContent, /Tiros detectados \+2.*Away.*Tiros detectados \+2.*Alpha/);
   const shotRows = events.children.filter(row => /match-event-shot/.test(row.className));
   assert.equal(shotRows.length, 2);
-  assert.equal(shotRows[0].attributes["aria-label"], "14': aumento detectado de 2 tiros de Alpha entre actualizaciones.");
+  assert.equal(shotRows[0].attributes["aria-label"], "21': aumento detectado de 2 tiros de Away entre actualizaciones.");
+  assert.equal(shotRows[1].attributes["aria-label"], "14': aumento detectado de 2 tiros de Alpha entre actualizaciones.");
 });
 
 test("timeline never treats an unavailable shot count as zero", async () => {

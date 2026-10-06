@@ -603,8 +603,8 @@ function renderMatchEvents(item) {
     .map((event, sequence) => ({ ...event, source: "provider", sequence }));
   const shots = detectedShotUpdates(item.points).map((event, sequence) => ({ ...event, sequence }));
   const events = [...incidents, ...shots].sort((left, right) => (
-    left.minute - right.minute
-    || (left.added_time || 0) - (right.added_time || 0)
+    right.minute - left.minute
+    || (right.added_time || 0) - (left.added_time || 0)
     || Number(left.source === "detected") - Number(right.source === "detected")
     || left.sequence - right.sequence
   ));
