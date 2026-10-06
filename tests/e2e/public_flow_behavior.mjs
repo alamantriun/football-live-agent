@@ -296,6 +296,35 @@ test("verified events show chronological local/away match moments and safe crest
   assert.match(h.nodes.get("#matrix-teams").textContent, /AL/);
 });
 
+test("timeline uses incident symbols and detects shot increases between provider readings", async () => {
+  const h = await harness();
+  const points = [point(5), point(14), point(21)];
+  points[0].stats.shots = { home: 1, away: 2 };
+  points[1].stats.shots = { home: 3, away: 2 };
+  points[2].stats.shots = { home: 3, away: 4 };
+
+  await selected(h, history(A, "fresh", points));
+
+  const events = h.nodes.get("#match-events");
+  assert.match(events.textContent, /⚽.*Gol.*🟨.*Tarjeta amarilla.*🟥.*Tarjeta roja/);
+  assert.match(events.textContent, /Tiros detectados \+2.*Alpha.*Tiros detectados \+2.*Away/);
+  const shotRows = events.children.filter(row => /match-event-shot/.test(row.className));
+  assert.equal(shotRows.length, 2);
+  assert.equal(shotRows[0].attributes["aria-label"], "14': aumento detectado de 2 tiros de Alpha entre actualizaciones.");
+});
+
+test("timeline never treats an unavailable shot count as zero", async () => {
+  const h = await harness();
+  const points = [point(5), point(14)];
+  points[0].stats.shots = { home: null, away: null };
+  points[1].stats.shots = { home: 3, away: 2 };
+
+  await selected(h, history(A, "fresh", points));
+
+  const shotRows = h.nodes.get("#match-events").children.filter(row => /match-event-shot/.test(row.className));
+  assert.equal(shotRows.length, 0);
+});
+
 test("event timeline clears rows for a newly selected match and states verified absence", async () => {
   const h = await harness(); await selected(h);
   assert.equal(h.nodes.get("#match-events").children.length, 3);

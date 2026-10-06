@@ -478,9 +478,42 @@ function renderBtts(yes, no, available) {
   bttsVisual.setAttribute("aria-label", `¿Anotan ambos equipos?: sí, ambos marcan ${yesLabel}; no, uno se queda sin marcar ${noLabel}.`);
 }
 
+function detectedShotUpdates(points) {
+  const latest = { home: null, away: null };
+  const updates = [];
+  for (const point of Array.isArray(points) ? points : []) {
+    const minute = point?.minute;
+    if (!Number.isFinite(minute) || minute < 0) continue;
+    for (const side of ["home", "away"]) {
+      const total = point?.stats?.shots?.[side];
+      if (!Number.isFinite(total) || total < 0) continue;
+      const previous = latest[side];
+      if (Number.isFinite(previous) && total > previous) {
+        updates.push({ minute, added_time: null, side, kind: "shot", increment: total - previous, source: "detected" });
+      }
+      latest[side] = Number.isFinite(previous) ? Math.max(previous, total) : total;
+    }
+  }
+  return updates;
+}
+
 function renderMatchEvents(item) {
-  const labels = { goal: "Gol", yellow_card: "Tarjeta amarilla", red_card: "Tarjeta roja" };
-  const events = Array.isArray(item.events) ? item.events.filter(event => labels[event?.kind]) : [];
+  const eventTypes = {
+    goal: { label: "Gol", icon: "⚽" },
+    yellow_card: { label: "Tarjeta amarilla", icon: "🟨" },
+    red_card: { label: "Tarjeta roja", icon: "🟥" },
+    shot: { label: "Tiros detectados", icon: "◎" },
+  };
+  const incidents = (Array.isArray(item.events) ? item.events : [])
+    .filter(event => eventTypes[event?.kind] && event.kind !== "shot")
+    .map((event, sequence) => ({ ...event, source: "provider", sequence }));
+  const shots = detectedShotUpdates(item.points).map((event, sequence) => ({ ...event, sequence }));
+  const events = [...incidents, ...shots].sort((left, right) => (
+    left.minute - right.minute
+    || (left.added_time || 0) - (right.added_time || 0)
+    || Number(left.source === "detected") - Number(right.source === "detected")
+    || left.sequence - right.sequence
+  ));
   matchEvents.replaceChildren();
   matchEventsSection.hidden = false;
   if (!events.length) {
@@ -490,10 +523,14 @@ function renderMatchEvents(item) {
   for (const event of events) {
     const minute = `${event.minute}${Number.isInteger(event.added_time) && event.added_time > 0 ? `+${event.added_time}` : ""}'`;
     const team = event.side === "away" ? item.away_name : item.home_name;
-    const kind = labels[event.kind];
+    const type = eventTypes[event.kind];
+    const copy = event.kind === "shot" ? `${type.label} +${event.increment} · ${team}` : `${type.label} · ${team}`;
+    const shotWord = event.increment === 1 ? "tiro" : "tiros";
     const row = element("li", `match-event match-event-${event.kind}`);
-    row.setAttribute("aria-label", `${minute}: ${kind.toLowerCase()} de ${team}.`);
-    row.append(element("strong", "match-event-minute", minute), element("span", "match-event-marker"), element("span", "match-event-copy", `${kind} · ${team}`));
+    row.setAttribute("aria-label", event.kind === "shot"
+      ? `${minute}: aumento detectado de ${event.increment} ${shotWord} de ${team} entre actualizaciones.`
+      : `${minute}: ${type.label.toLowerCase()} de ${team}.`);
+    row.append(element("strong", "match-event-minute", minute), element("span", "match-event-marker"), element("span", "match-event-icon", type.icon), element("span", "match-event-copy", copy));
     matchEvents.append(row);
   }
 }
