@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(62);
+select plan(65);
 
 select has_table('private', 'fixtures', 'fixtures exists');
 select has_table('private', 'predictions', 'predictions exists');
@@ -20,6 +20,9 @@ select ok(not has_table_privilege('anon', 'private.fixtures', 'INSERT'), 'anon c
 select ok(not has_table_privilege('anon', 'private.match_events', 'SELECT'), 'anon cannot read match events');
 select ok(not has_table_privilege('anon', 'private.match_events', 'INSERT'), 'anon cannot write match events');
 select ok(not has_table_privilege('authenticated', 'private.match_events', 'SELECT'), 'authenticated cannot read match events');
+select ok(not has_table_privilege('authenticated', 'private.match_events', 'INSERT'), 'authenticated cannot insert match events');
+select ok(not has_table_privilege('authenticated', 'private.match_events', 'UPDATE'), 'authenticated cannot update match events');
+select ok(not has_table_privilege('authenticated', 'private.match_events', 'DELETE'), 'authenticated cannot delete match events');
 select ok(has_table_privilege('service_role', 'private.match_events', 'SELECT'), 'service can read match events');
 select ok(has_table_privilege('service_role', 'private.match_events', 'INSERT'), 'service can insert match events');
 select ok(has_table_privilege('service_role', 'private.match_events', 'UPDATE'), 'service can update match events');
