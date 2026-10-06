@@ -39,11 +39,14 @@ PUBLIC_MODEL_SELECT = (
     "version,train_size,validation_size,brier,log_loss,activated_at,"
     "last_training_finished_at,last_training_decision,updated_at"
 )
-HISTORY_FIXTURE_SELECT = "id,public_id,home_name,away_name"
+HISTORY_FIXTURE_SELECT = (
+    "id,public_id,home_name,away_name,home_logo_url,away_logo_url"
+)
 HISTORY_SNAPSHOT_SELECT = (
     "id,minute,score_home,score_away,normalized_stats,"
     "provider_observed_at,collected_at,quality"
 )
+MATCH_EVENT_SELECT = "minute,added_time,side,kind,provider_event_order"
 HISTORY_STAT_KEYS = (
     "possession",
     "shots",
@@ -600,6 +603,8 @@ class SupabaseGateway:
                 "public_id": fixture["public_id"],
                 "home_name": fixture["home_name"],
                 "away_name": fixture["away_name"],
+                "home_logo_url": fixture["home_logo_url"],
+                "away_logo_url": fixture["away_logo_url"],
             }
         except (KeyError, TypeError, ValueError) as exc:
             raise RepositoryUnavailable(PUBLIC_ERROR) from exc
@@ -620,6 +625,17 @@ class SupabaseGateway:
                 "match_history_predictions",
                 {"p_fixture_id": fixture_id, "p_limit": bounded_limit},
             )
+            .execute()
+        )
+        event_response = self._execute(
+            lambda: self._client.schema("private")
+            .table("match_events")
+            .select(MATCH_EVENT_SELECT)
+            .eq("fixture_id", fixture_id)
+            .order("minute")
+            .order("added_time", nullsfirst=True)
+            .order("provider_event_order")
+            .limit(80)
             .execute()
         )
 
@@ -670,12 +686,39 @@ class SupabaseGateway:
                         ),
                     }
                 )
+            events = [
+                MatchEvent.model_validate({
+                    "provider_order": row["provider_event_order"],
+                    "minute": row["minute"],
+                    "added_time": row["added_time"],
+                    "side": row["side"],
+                    "kind": row["kind"],
+                })
+                for row in self._rows(event_response)
+            ]
+            events.sort(
+                key=lambda event: (
+                    event.minute,
+                    event.added_time is not None,
+                    event.added_time if event.added_time is not None else 0,
+                    event.provider_order,
+                )
+            )
         except (KeyError, TypeError, ValueError) as exc:
             raise RepositoryUnavailable(PUBLIC_ERROR) from exc
 
         return result | {
             "model_version": model_version,
             "points": list(reversed(newest_points)),
+            "events": [
+                {
+                    "minute": event.minute,
+                    "added_time": event.added_time,
+                    "side": event.side,
+                    "kind": event.kind,
+                }
+                for event in events
+            ],
         }
 
     @staticmethod

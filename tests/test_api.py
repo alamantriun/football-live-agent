@@ -69,13 +69,27 @@ def history_point(index: int = 0, **changes):
     return point
 
 
+def history_event(**changes):
+    event = {
+        "minute": 17,
+        "added_time": None,
+        "side": "home",
+        "kind": "goal",
+    }
+    event.update(changes)
+    return event
+
+
 def history_row(**changes):
     row = {
         "public_id": str(PUBLIC_ID),
         "home_name": "Arsenal",
         "away_name": "Chelsea",
+        "home_logo_url": "https://cdn.example.test/arsenal.png",
+        "away_logo_url": "https://cdn.example.test/chelsea.png",
         "model_version": "v2026.09.30",
         "points": [history_point(index) for index in range(4)],
+        "events": [],
     }
     row.update(changes)
     return row
@@ -189,6 +203,8 @@ def test_match_validates_public_uuid_and_returns_not_found_for_absent_match(clie
 
 
 def test_match_history_returns_safe_points_and_derived_analytics(client, repository):
+    repository.history = history_row(events=[history_event()])
+
     response = client.get(
         f"/api/matches/{PUBLIC_ID}/history?limit=30",
         headers={"X-Request-ID": str(REQUEST_ID)},
@@ -207,7 +223,16 @@ def test_match_history_returns_safe_points_and_derived_analytics(client, reposit
     assert body["data_status"] == "degraded"
     assert body["model_version"] == "v2026.09.30"
     item = body["item"]
-    assert set(item) == {"public_id", "home_name", "away_name", "points", "analytics"}
+    assert set(item) == {
+        "public_id",
+        "home_name",
+        "away_name",
+        "home_logo_url",
+        "away_logo_url",
+        "points",
+        "events",
+        "analytics",
+    }
     assert item["public_id"] == str(PUBLIC_ID)
     assert set(item["points"][0]) == {
         "minute",
@@ -223,6 +248,10 @@ def test_match_history_returns_safe_points_and_derived_analytics(client, reposit
     }
     assert item["points"][0]["stats"]["corners"]["home"] is None
     assert item["points"][0]["collected_at"] is None
+    assert item["home_logo_url"] == "https://cdn.example.test/arsenal.png"
+    assert item["away_logo_url"] == "https://cdn.example.test/chelsea.png"
+    assert item["events"] == [history_event()]
+    assert set(item["events"][0]) == {"minute", "added_time", "side", "kind"}
     assert set(item["analytics"]) == {
         "activity",
         "momentum",
@@ -239,7 +268,25 @@ def test_match_history_returns_safe_points_and_derived_analytics(client, reposit
     )
     assert "provider_fixture_id" not in response.text
     assert "sanitized_provider_data" not in response.text
+    assert "provider_event_order" not in response.text
+    assert "fixture_id" not in response.text
     assert repository.history_calls == [(PUBLIC_ID, 30)]
+
+
+def test_match_history_allows_null_logos_and_empty_events(client, repository):
+    repository.history = history_row(
+        home_logo_url=None,
+        away_logo_url=None,
+        events=[],
+    )
+
+    response = client.get(f"/api/matches/{PUBLIC_ID}/history")
+
+    assert response.status_code == 200
+    item = response.json()["item"]
+    assert item["home_logo_url"] is None
+    assert item["away_logo_url"] is None
+    assert item["events"] == []
 
 
 @pytest.mark.parametrize("limit", [0, 91])

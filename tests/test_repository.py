@@ -91,8 +91,15 @@ class FakeQuery:
         self.operation.setdefault("filters", []).append(("is", column, value))
         return self
 
-    def order(self, column, *, desc=False):
-        self.operation["order"] = (column, desc)
+    def order(self, column, *, desc=False, nullsfirst=False):
+        ordering = (column, desc, nullsfirst) if nullsfirst else (column, desc)
+        previous = self.operation.get("order")
+        if previous is None:
+            self.operation["order"] = ordering
+        elif isinstance(previous, list):
+            previous.append(ordering)
+        else:
+            self.operation["order"] = [previous, ordering]
         return self
 
     def limit(self, value):
@@ -120,7 +127,10 @@ class FakeQuery:
                 start + self.client.server_max_rows - 1,
             )
             return FakeResponse(rows[start : capped_end + 1])
-        return FakeResponse(self.client.responses.get(key, []))
+        rows = self.client.responses.get(key, [])
+        if "limit" in self.operation:
+            rows = rows[:self.operation["limit"]]
+        return FakeResponse(rows)
 
 
 class FakeSchema:
@@ -843,6 +853,8 @@ def test_public_match_history_uses_private_allowlist_and_returns_chronological_p
             "public_id": str(public_id),
             "home_name": "Arsenal",
             "away_name": "Chelsea",
+            "home_logo_url": "https://cdn.example.test/arsenal.png",
+            "away_logo_url": "https://cdn.example.test/chelsea.png",
             "provider_fixture_id": "provider-fixture-raw",
         }
     ]
@@ -852,6 +864,24 @@ def test_public_match_history_uses_private_allowlist_and_returns_chronological_p
     fake_client.responses[("private", "rpc", "match_history_predictions")] = (
         history_prediction_rows()
     )
+    fake_client.responses[("private", "table", "match_events")] = [
+        {
+            "minute": 45,
+            "added_time": 3,
+            "side": "away",
+            "kind": "yellow_card",
+            "provider_event_order": 2,
+            "private_fixture_id": str(FIXTURE_ID),
+        },
+        {
+            "minute": 17,
+            "added_time": None,
+            "side": "home",
+            "kind": "goal",
+            "provider_event_order": 1,
+            "private_fixture_id": str(FIXTURE_ID),
+        },
+    ]
 
     result = gateway.public_match_history(public_id, limit=500)
 
@@ -860,9 +890,23 @@ def test_public_match_history_uses_private_allowlist_and_returns_chronological_p
         "public_id",
         "home_name",
         "away_name",
+        "home_logo_url",
+        "away_logo_url",
         "model_version",
         "points",
+        "events",
     }
+    assert result["home_logo_url"] == "https://cdn.example.test/arsenal.png"
+    assert result["away_logo_url"] == "https://cdn.example.test/chelsea.png"
+    assert result["events"] == [
+        {"minute": 17, "added_time": None, "side": "home", "kind": "goal"},
+        {
+            "minute": 45,
+            "added_time": 3,
+            "side": "away",
+            "kind": "yellow_card",
+        },
+    ]
     assert [point["minute"] for point in result["points"]] == [60, 61, 62]
     assert result["model_version"] == "active-v1"
     assert result["points"][-1]["probabilities"] == {
@@ -918,16 +962,18 @@ def test_public_match_history_uses_private_allowlist_and_returns_chronological_p
         "sanitized_provider_data",
         "parameters",
         "secret",
+        "provider_event_order",
+        "private_fixture_id",
     ):
         assert forbidden not in serialized
 
-    fixture_query, snapshot_query, prediction_query = fake_client.operations[-3:]
+    fixture_query, snapshot_query, prediction_query, event_query = fake_client.operations[-4:]
     assert fixture_query == {
         "schema": "private",
         "kind": "table",
         "name": "fixtures",
         "params": None,
-        "select": "id,public_id,home_name,away_name",
+        "select": "id,public_id,home_name,away_name,home_logo_url,away_logo_url",
         "filters": [("eq", "public_id", str(result["public_id"]))],
         "limit": 1,
     }
@@ -950,6 +996,20 @@ def test_public_match_history_uses_private_allowlist_and_returns_chronological_p
         "name": "match_history_predictions",
         "params": {"p_fixture_id": str(FIXTURE_ID), "p_limit": 90},
     }
+    assert event_query == {
+        "schema": "private",
+        "kind": "table",
+        "name": "match_events",
+        "params": None,
+        "select": "minute,added_time,side,kind,provider_event_order",
+        "filters": [("eq", "fixture_id", str(FIXTURE_ID))],
+        "order": [
+            ("minute", False),
+            ("added_time", False, True),
+            ("provider_event_order", False),
+        ],
+        "limit": 80,
+    }
 
 
 def test_public_match_history_returns_none_without_private_history_queries(
@@ -960,6 +1020,82 @@ def test_public_match_history_returns_none_without_private_history_queries(
     assert gateway.public_match_history(public_id) is None
     assert len(fake_client.operations) == 1
     assert fake_client.operations[0]["name"] == "fixtures"
+
+
+def test_public_match_history_returns_empty_safe_events_and_bounds_them_to_eighty(
+    gateway, fake_client
+):
+    public_id = UUID("337a09f3-a806-4e56-a068-d758f74a78cb")
+    fake_client.responses[("private", "table", "fixtures")] = [{
+        "id": str(FIXTURE_ID),
+        "public_id": str(public_id),
+        "home_name": "Arsenal",
+        "away_name": "Chelsea",
+        "home_logo_url": None,
+        "away_logo_url": None,
+    }]
+    fake_client.responses[("private", "table", "live_snapshots")] = []
+    fake_client.responses[("private", "rpc", "match_history_predictions")] = []
+    fake_client.responses[("private", "table", "match_events")] = [
+        {
+            "minute": index,
+            "added_time": None,
+            "side": "home",
+            "kind": "goal",
+            "provider_event_order": index + 1,
+        }
+        for index in range(1, 82)
+    ]
+
+    result = gateway.public_match_history(public_id)
+
+    assert result is not None
+    assert result["home_logo_url"] is None
+    assert result["away_logo_url"] is None
+    assert len(result["events"]) == 80
+    assert result["events"][0] == {
+        "minute": 1,
+        "added_time": None,
+        "side": "home",
+        "kind": "goal",
+    }
+    assert fake_client.operations[-1]["limit"] == 80
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [("side", "neutral"), ("kind", "substitution")],
+)
+def test_public_match_history_sanitizes_malformed_event_rows(
+    gateway, fake_client, field, value
+):
+    public_id = UUID("337a09f3-a806-4e56-a068-d758f74a78cb")
+    fake_client.responses[("private", "table", "fixtures")] = [{
+        "id": str(FIXTURE_ID),
+        "public_id": str(public_id),
+        "home_name": "Arsenal",
+        "away_name": "Chelsea",
+        "home_logo_url": None,
+        "away_logo_url": None,
+    }]
+    fake_client.responses[("private", "table", "live_snapshots")] = []
+    fake_client.responses[("private", "rpc", "match_history_predictions")] = []
+    event = {
+        "minute": 45,
+        "added_time": None,
+        "side": "home",
+        "kind": "goal",
+        "provider_event_order": 1,
+        "raw_event_marker": "must-not-leak",
+    }
+    event[field] = value
+    fake_client.responses[("private", "table", "match_events")] = [event]
+
+    with pytest.raises(RepositoryUnavailable) as captured:
+        gateway.public_match_history(public_id)
+
+    assert str(captured.value) == "El repositorio no está disponible temporalmente."
+    assert "must-not-leak" not in str(captured.value)
 
 
 @pytest.mark.parametrize(

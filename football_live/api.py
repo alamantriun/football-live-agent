@@ -117,6 +117,13 @@ class HistoryPoint(StrictDomainModel):
     prediction_created_at: AwareDatetime | None
 
 
+class HistoryMatchEvent(StrictDomainModel):
+    minute: MatchMinute
+    added_time: int | None = Field(default=None, ge=0, le=30)
+    side: Literal["home", "away"]
+    kind: Literal["goal", "yellow_card", "red_card"]
+
+
 class TrendPoint(StrictDomainModel):
     minute: MatchMinute | None
     observed_at: AwareDatetime
@@ -178,7 +185,10 @@ class MatchHistory(StrictDomainModel):
     public_id: UUID
     home_name: _PublicName
     away_name: _PublicName
+    home_logo_url: str | None = None
+    away_logo_url: str | None = None
     points: Annotated[list[HistoryPoint], Field(max_length=90)]
+    events: Annotated[list[HistoryMatchEvent], Field(max_length=80)]
     analytics: LiveAnalyticsResponse
 
 
@@ -400,6 +410,7 @@ def create_app(
             raise ApiError(404, "not_found", "El partido no está disponible.")
 
         points = [HistoryPoint.model_validate(point) for point in row["points"]]
+        events = [HistoryMatchEvent.model_validate(event) for event in row["events"]]
         now = _now()
         data_status = DataStatus.SUSPENDED
         analytics_points = [point.model_dump() for point in points]
@@ -417,7 +428,10 @@ def create_app(
             "public_id": row["public_id"],
             "home_name": row["home_name"],
             "away_name": row["away_name"],
+            "home_logo_url": row["home_logo_url"],
+            "away_logo_url": row["away_logo_url"],
             "points": points,
+            "events": events,
             "analytics": analytics,
         })
         envelope = MatchHistoryEnvelope(
