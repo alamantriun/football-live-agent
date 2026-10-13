@@ -192,7 +192,7 @@ class SupabaseGateway:
             .table("fixtures")
             .select(FIXTURE_SELECT)
             .eq("status", "live")
-            .limit(self._cap(limit, 12))
+            .limit(self._cap(limit, 100))
             .execute()
         )
         return [Fixture.model_validate(row) for row in self._rows(response)]

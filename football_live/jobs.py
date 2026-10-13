@@ -19,6 +19,9 @@ DISCOVER_LEASE_SECONDS = 120
 COLLECT_LEASE_SECONDS = 120
 SETTLE_LEASE_SECONDS = 180
 TRAIN_LEASE_SECONDS = 900
+COLLECT_FIXTURE_LIMIT = 12
+COLLECT_FIXTURE_SCAN_LIMIT = 100
+_CHAMPIONS_COMPETITION_MARKERS = ("champions league", "liga de campeones")
 
 _FINAL_STATUSES = frozenset(
     {"ft", "finished", "ended", "finalizado", "full time", "final"}
@@ -41,6 +44,25 @@ def _plain_status(value: Any) -> str:
         .lower()
         .split()
     )
+
+
+def _prioritize_collect_fixtures(
+    fixtures: list[Fixture], limit: int = COLLECT_FIXTURE_LIMIT
+) -> list[Fixture]:
+    """Keep the bounded collector focused on high-value live competitions."""
+    ordered = sorted(
+        enumerate(fixtures),
+        key=lambda pair: (
+            0
+            if any(
+                marker in _plain_status(pair[1].competition)
+                for marker in _CHAMPIONS_COMPETITION_MARKERS
+            )
+            else 1,
+            pair[0],
+        ),
+    )
+    return [fixture for _, fixture in ordered[:limit]]
 
 
 def _error_code(exc: BaseException, fallback: str) -> str:
@@ -166,7 +188,8 @@ async def run_discover(repo, provider, request_id: UUID, key: str) -> JobResult:
 
 async def run_collect(repo, provider, predictor, request_id: UUID, key: str) -> JobResult:
     async def work() -> tuple[str, dict[str, Any], None]:
-        fixtures = repo.active_fixtures(limit=12)[:12]
+        candidates = repo.active_fixtures(limit=COLLECT_FIXTURE_SCAN_LIMIT)
+        fixtures = _prioritize_collect_fixtures(candidates)
         counters = {
             "selected": len(fixtures),
             "snapshots": 0,

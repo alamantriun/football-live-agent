@@ -662,7 +662,7 @@ def test_active_fixtures_uses_private_schema_bounded_select_and_limit(
             "final_away,discovered_at,updated_at,finished_at"
         ),
         "filters": [("eq", "status", "live")],
-        "limit": 12,
+        "limit": 100,
     }
 
 

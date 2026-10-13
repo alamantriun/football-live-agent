@@ -369,6 +369,33 @@ async def test_collect_caps_at_12_uses_concurrency_two_and_skips_stale_sentinel(
         "event_errors": 0,
         "processing_errors": 0,
     }
+
+
+@pytest.mark.asyncio
+async def test_collect_prioritizes_champions_matches_outside_the_first_twelve():
+    repo = FakeRepository()
+    repo.fixtures = [make_fixture(index) for index in range(12)]
+    champions = [
+        make_fixture(12, competition="Champions League"),
+        make_fixture(13, competition="Champions League"),
+    ]
+    repo.fixtures.extend(champions)
+    provider = FakeProvider(
+        snapshots={fixture.provider_fixture_id: make_provider_snapshot(fixture) for fixture in repo.fixtures}
+    )
+    predictor = FakePredictor()
+
+    result = await run_collect(
+        repo,
+        provider,
+        predictor,
+        HTTP_REQUEST_ID,
+        "collect:champions-priority",
+    )
+
+    assert result.status == "succeeded"
+    assert len(provider.snapshot_calls) == 12
+    assert {fixture.provider_fixture_id for fixture in champions}.issubset(provider.snapshot_calls)
     assert repo.finishes[-1][2] == "succeeded"
     assert repo.finishes[-1][-1] is None
 
