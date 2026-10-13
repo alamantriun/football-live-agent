@@ -291,10 +291,36 @@ async def test_discover_caps_provider_results_at_100_and_finishes_with_fencing_t
             RUN_ID,
             FENCING_REQUEST_ID,
             "succeeded",
-            {"provider_fixtures": 105, "stored": 100, "truncated": 5},
+            {
+                "provider_fixtures": 105,
+                "stored": 100,
+                "truncated": 5,
+                "retired_missing": 0,
+            },
             None,
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_discover_retires_live_fixtures_missing_from_provider_feed():
+    repo = FakeRepository()
+    stale = make_fixture(900)
+    current = make_provider_fixture(901)
+    repo.fixtures = [stale]
+
+    result = await run_discover(
+        repo,
+        FakeProvider([current]),
+        HTTP_REQUEST_ID,
+        "discover:retires-missing",
+    )
+
+    assert result.status == "succeeded"
+    retired = next(item for item in repo.upserted if item.provider_fixture_id == stale.provider_fixture_id)
+    assert retired.status == "unavailable"
+    assert retired.finished_at is not None
+    assert [item.provider_fixture_id for item in repo.upserted if item.status == "live"] == [current.provider_fixture_id]
 
 
 @pytest.mark.asyncio

@@ -87,8 +87,13 @@ function clearVisualDecimals(group) {
   visualDecimalNodes = visualDecimalNodes.filter(entry => entry.group !== group);
 }
 
-function visualProbability(value, group) {
+function clampProbability(value) {
   const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(0, Math.min(100, numeric)) : NaN;
+}
+
+function visualProbability(value, group) {
+  const numeric = clampProbability(value);
   const [integer, decimal] = numeric.toFixed(2).split(".");
   const wrapper = element("span", "probability-visual-value");
   const visual = element("span", "probability-visual");
@@ -96,6 +101,7 @@ function visualProbability(value, group) {
   const decimalNode = element("span", "probability-visual-decimal", `.${decimal}`);
   decimalNode.setAttribute("aria-hidden", "true");
   decimalNode.dataset.baseDecimal = decimal;
+  decimalNode.dataset.baseValue = String(numeric);
   decimalNode.dataset.visualIndex = String(visualDecimalNodes.length);
   visual.append(element("span", "probability-integer", integer), decimalNode, element("span", "probability-suffix", "%"));
   wrapper.append(visual, element("span", "sr-only", `${numeric}%`));
@@ -107,6 +113,11 @@ function refreshVisualDecimals() {
   visualDecimalTick += 1;
   const offsets = [1, -1, 2, -2, 1, -1];
   for (const { node } of visualDecimalNodes) {
+    const baseValue = Number(node.dataset.baseValue);
+    if (baseValue >= 100) {
+      node.textContent = ".00";
+      continue;
+    }
     const base = Number(node.dataset.baseDecimal);
     const offset = offsets[(visualDecimalTick + Number(node.dataset.visualIndex || 0)) % offsets.length];
     const next = Math.max(0, Math.min(99, base + offset));
@@ -546,7 +557,7 @@ function renderScoreRanking(target, rows) {
 }
 
 function probabilityLabel(value) {
-  return `${Number(value).toFixed(2)}%`;
+  return `${clampProbability(value).toFixed(2)}%`;
 }
 
 function renderBtts(yes, no, available) {
@@ -677,8 +688,8 @@ function renderScoreMatrix(rows, matchId) {
       const cell = element("span", changed ? "score-matrix-cell matrix-cell-changed" : "score-matrix-cell", available ? undefined : "—");
       if (available) cell.append(visualProbability(probability, "matrix"));
       cell.setAttribute("role", "cell");
-      cell.setAttribute("aria-label", `Local ${home}, visitante ${away}: ${available ? `${probability}%` : "dato no disponible"}`);
-      if (available) cell.style.setProperty("--heat", String(Math.max(0.06, Math.min(0.9, probability / 35))));
+      cell.setAttribute("aria-label", `Local ${home}, visitante ${away}: ${available ? probabilityLabel(probability) : "dato no disponible"}`);
+      if (available) cell.style.setProperty("--heat", String(Math.max(0.06, Math.min(0.9, clampProbability(probability) / 35))));
       row.append(cell);
     }
     scoreMatrix.append(row);

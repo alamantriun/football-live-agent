@@ -4,6 +4,7 @@ import asyncio
 import os
 import unicodedata
 from collections.abc import Awaitable, Callable
+from datetime import datetime, timezone
 from typing import Any, Literal
 from uuid import UUID
 
@@ -162,6 +163,20 @@ async def run_discover(repo, provider, request_id: UUID, key: str) -> JobResult:
     async def work() -> tuple[str, dict[str, Any], None]:
         provider_fixtures = await provider.list_live()
         selected = provider_fixtures[:100]
+        retired = 0
+        if len(provider_fixtures) <= 100:
+            seen_provider_ids = {item.provider_fixture_id for item in selected}
+            missing = [
+                fixture.model_copy(
+                    update={
+                        "status": "unavailable",
+                        "finished_at": datetime.now(timezone.utc),
+                    }
+                )
+                for fixture in repo.active_fixtures(limit=COLLECT_FIXTURE_SCAN_LIMIT)
+                if fixture.provider_fixture_id not in seen_provider_ids
+            ]
+            retired = repo.upsert_fixtures(missing)
         stored = repo.upsert_fixtures(
             [_fixture_from_provider(item) for item in selected]
         )
@@ -171,6 +186,7 @@ async def run_discover(repo, provider, request_id: UUID, key: str) -> JobResult:
                 "provider_fixtures": len(provider_fixtures),
                 "stored": stored,
                 "truncated": max(0, len(provider_fixtures) - len(selected)),
+                "retired_missing": retired,
             },
             None,
         )

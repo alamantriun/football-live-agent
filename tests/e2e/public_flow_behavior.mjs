@@ -261,6 +261,21 @@ test("both teams to score uses an accessible visual instead of generic market ro
   assert.doesNotMatch(h.nodes.get("#market-probabilities").textContent, /Ambos marcan/);
 });
 
+test("probability visuals never animate above one hundred percent", async () => {
+  const h = await harness();
+  const payload = history();
+  payload.item.analytics.markets = { over_2_5: 100.81, under_2_5: 0, btts_yes: 100.81, btts_no: 0 };
+  await selected(h, payload);
+
+  const btts = h.nodes.get("#btts-visual");
+  assert.match(btts.textContent, /100\s*\.00\s*%/);
+  assert.doesNotMatch(btts.textContent, /100\.81/);
+  assert.doesNotMatch(btts.attributes["aria-label"], /100\.81/);
+
+  h.intervals[2]();
+  assert.doesNotMatch(btts.textContent, /10[0-9]\./);
+});
+
 test("scenario probabilities render as dedicated visual panels without changing published values", async () => {
   const h = await harness(); await selected(h);
 
