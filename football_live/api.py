@@ -268,6 +268,17 @@ def _response_status(items: list[PublicMatch]) -> DataStatus:
     return max((item.data_status for item in items), key=precedence.__getitem__)
 
 
+def _is_current_public_live(item: PublicMatch, now: datetime) -> bool:
+    """Keep delayed database rows from masquerading as currently live matches."""
+    if item.status != "live" or item.provider_observed_at is None:
+        return False
+    return classify_freshness(
+        item.provider_observed_at,
+        now,
+        item.data_status.value,
+    ) != "suspended"
+
+
 async def _require_job_request(
     request: Request,
     settings: Settings,
@@ -370,11 +381,16 @@ def create_app(
     async def live(request: Request, limit: int = 12, cursor: str | None = None) -> JSONResponse:
         if not 1 <= limit <= 50:
             raise ApiError(422, "invalid_request", "El límite debe estar entre 1 y 50.")
-        items = [PublicMatch.model_validate(row) for row in repository.public_live(limit, cursor)]
+        now = _now()
+        items = [
+            item
+            for item in (PublicMatch.model_validate(row) for row in repository.public_live(limit, cursor))
+            if _is_current_public_live(item, now)
+        ]
         versions = {item.model_version for item in items if item.model_version}
         return _json(200, LiveEnvelope(
             request_id=_request_id(request),
-            generated_at=_now(),
+            generated_at=now,
             data_status=_response_status(items),
             model_version=versions.pop() if len(versions) == 1 else None,
             items=items,
@@ -386,6 +402,8 @@ def create_app(
         if row is None:
             raise ApiError(404, "not_found", "Partido no encontrado.")
         item = PublicMatch.model_validate(row)
+        if not _is_current_public_live(item, _now()):
+            raise ApiError(404, "not_found", "El partido ya no está disponible en vivo.")
         return _json(200, MatchEnvelope(
             request_id=_request_id(request),
             generated_at=_now(),

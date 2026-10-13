@@ -99,6 +99,7 @@ class FakeRepository:
     def __init__(self, *, unavailable: bool = False) -> None:
         self.unavailable = unavailable
         self.live_calls: list[tuple[int, str | None]] = []
+        self.live_rows = [live_row()]
         self.match_calls: list[UUID] = []
         self.history_calls: list[tuple[UUID, int]] = []
         self.history = history_row()
@@ -108,7 +109,7 @@ class FakeRepository:
         if self.unavailable:
             raise RepositoryUnavailable("supabase secret response and traceback")
         self.live_calls.append((limit, cursor))
-        return [live_row()]
+        return self.live_rows
 
     def public_match(self, public_id):
         self.match_calls.append(public_id)
@@ -190,6 +191,24 @@ def test_live_rejects_oversized_limit_before_querying_repository(client, reposit
 
     assert response.status_code == 422
     assert repository.live_calls == []
+
+
+def test_live_hides_projection_when_provider_observation_is_suspended(client, repository):
+    repository.live_rows = [
+        live_row(),
+        live_row(
+            public_id=str(UUID("10000000-0000-0000-0000-000000000002")),
+            home_name="Australia Sub23",
+            away_name="Corea del Sur Sub23",
+            provider_observed_at=(NOW - timedelta(seconds=121)).isoformat(),
+            updated_at=(NOW - timedelta(seconds=121)).isoformat(),
+        ),
+    ]
+
+    response = client.get("/api/live")
+
+    assert response.status_code == 200
+    assert [item["home_name"] for item in response.json()["items"]] == ["Arsenal"]
 
 
 def test_match_validates_public_uuid_and_returns_not_found_for_absent_match(client):
