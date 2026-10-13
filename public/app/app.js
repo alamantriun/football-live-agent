@@ -114,7 +114,7 @@ function refreshVisualDecimals() {
   const offsets = [1, -1, 2, -2, 1, -1];
   for (const { node } of visualDecimalNodes) {
     const baseValue = Number(node.dataset.baseValue);
-    if (baseValue >= 100) {
+    if (baseValue <= 0 || baseValue >= 100) {
       node.textContent = ".00";
       continue;
     }

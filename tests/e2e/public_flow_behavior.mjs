@@ -274,6 +274,7 @@ test("probability visuals never animate above one hundred percent", async () => 
 
   h.intervals[2]();
   assert.doesNotMatch(btts.textContent, /10[0-9]\./);
+  assert.match(btts.textContent, /No, uno se queda sin marcar\s*0\s*\.00\s*%/);
 });
 
 test("scenario probabilities render as dedicated visual panels without changing published values", async () => {
