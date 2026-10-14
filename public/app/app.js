@@ -260,7 +260,12 @@ function probabilityCard(label, value, changed = false) {
   return row;
 }
 
-function renderDetail(item) {
+function renderDetail(item, { opening = false } = {}) {
+  if (opening) {
+    detail.className = "match-detail";
+    void detail.offsetWidth;
+    detail.className = "match-detail detail-opening";
+  }
   detail.setAttribute("aria-busy", "false");
   const visualState = matchVisualState(item);
   const nextDetailSnapshot = {
@@ -327,7 +332,7 @@ async function loadMatch(id, options = {}) {
     if (version !== selectionVersion || requestController.signal.aborted) return;
     if (response.item?.public_id !== id) throw new Error("mismatched match");
     const item = { ...response.item, data_status: response.data_status ?? response.item.data_status, model_version: response.model_version ?? response.item.model_version };
-    renderDetail(item);
+    renderDetail(item, { opening: !preserveAnalysis });
     loadedSummary = { id, version, item };
     setStatus(item.data_status === "degraded" ? "Datos parciales: la lectura conserva señales ausentes." : `Lectura actualizada · ${matchStateLabel(item)}.`, item.data_status);
     detailController = null;
@@ -442,7 +447,7 @@ function renderTeamStats(point, matchId) {
     const total = Number.isFinite(pair.home) && Number.isFinite(pair.away) ? pair.home + pair.away : null;
     for (const side of ["home", "away"]) {
       const value = pair[side]; const available = Number.isFinite(value);
-      const cell = element("span", "stat-value");
+      const cell = element("span", `stat-value ${side}`);
       cell.append(element("span", "", `${side === "home" ? "Local" : "Visitante"}: ${available ? `${value}${unit}` : "— · Dato no disponible"}`));
       if (available && total !== null) {
         const bar = element("span", `stat-bar ${side}`); bar.setAttribute("aria-hidden", "true");

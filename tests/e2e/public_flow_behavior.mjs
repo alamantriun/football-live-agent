@@ -61,7 +61,7 @@ async function harness() {
     node.hidden = /\bhidden\b/.test(token[2]);
     const id = token[2].match(/\bid="([^"]+)"/);
     if (id) nodes.set(`#${id[1]}`, node);
-    if (/class="analytics"/.test(token[2])) nodes.set(".analytics", node);
+    if (/class="[^"]*\banalytics\b/.test(token[2])) nodes.set(".analytics", node);
     if (stack.length) stack.at(-1).append(node); else root = node;
     if (!["meta", "link", "img", "br"].includes(token[1])) stack.push(node);
   }
@@ -374,6 +374,7 @@ test("event timeline clears rows for a newly selected match and states verified 
 test("selected live match exposes broadcast badges and motion hooks", async () => {
   const h = await harness(); const payload = history();
   await selected(h, payload, { ...summary(A), status: "live", minute: 63 });
+  assert.match(h.nodes.get("#match-detail").className, /detail-opening/);
   assert.equal(h.nodes.get("#match-detail").dataset.liveState, "live");
   assert.equal(h.nodes.get(".analytics").dataset.liveState, "live");
   assert.match(h.nodes.get("#match-detail").textContent, /EN VIVO/);

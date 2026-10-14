@@ -30,15 +30,37 @@ def test_dashboard_history_contract_and_responsive_styles():
         assert selector in css
 
 
-def test_follow_list_is_a_responsive_match_matrix_above_live_analysis():
+def test_live_workspace_keeps_selector_before_detail_column():
     css = (APP / "app.css").read_text(encoding="utf-8")
     html = (APP / "index.html").read_text(encoding="utf-8")
 
-    assert ".workspace{display:block}" in css
-    assert ".match-list{grid-template-columns:repeat(3,minmax(0,1fr))}" in css
-    assert ".match-list{grid-template-columns:repeat(2,minmax(0,1fr))}" in css
-    assert ".match-list{grid-template-columns:1fr}" in css
-    assert html.index('class="workspace"') < html.index('class="analytics"')
+    assert ".workspace-live-layout" in css
+    assert ".match-panel-live-rail" in css
+    assert 'class="workspace workspace-live-layout"' in html
+    assert html.index('class="match-panel match-panel-live-rail"') < html.index('class="detail-column"')
+
+
+def test_live_workspace_uses_scrollable_left_rail_and_animated_right_column():
+    css = (APP / "app.css").read_text(encoding="utf-8")
+    html = (APP / "index.html").read_text(encoding="utf-8")
+
+    assert 'class="detail-column"' in html
+    assert ".workspace-live-layout" in css
+    assert ".match-panel-live-rail" in css
+    assert "overflow-y:auto" in css
+    assert "detail-opening" in css
+    assert html.index('class="match-panel match-panel-live-rail"') < html.index('class="detail-column"') < html.index('class="analytics live-stat-contrast"')
+
+
+def test_live_statistics_have_semantic_high_contrast_tokens():
+    css = (APP / "app.css").read_text(encoding="utf-8")
+    html = (APP / "index.html").read_text(encoding="utf-8")
+    javascript = (APP / "app.js").read_text(encoding="utf-8")
+
+    assert "live-stat-contrast" in html
+    assert "--stats-home:" in css and "--stats-away:" in css
+    assert ".stat-value.home" in css and ".stat-value.away" in css
+    assert "stat-value ${side}" in javascript
 
 
 def test_dashboard_has_a_safe_same_origin_live_data_contract():

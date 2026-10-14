@@ -14,11 +14,11 @@
     <main>
       <section class="app-hero"><p class="kicker">Centro de lecturas</p><h1>Partidos<br><em>en vivo.</em></h1><p>Selecciona un encuentro para ver su marcador, la calidad de sus datos y las probabilidades publicadas.</p></section>
       <div class="data-status" id="data-status" role="status" data-state="loading">Cargando partidos disponibles…</div>
-      <section class="workspace" aria-label="Centro de partidos">
-        <aside class="match-panel"><div class="panel-title"><h2>En seguimiento</h2><button id="refresh" type="button">Actualizar</button></div><div id="match-list" class="match-list" aria-live="polite"></div></aside>
+      <section class="workspace workspace-live-layout" aria-label="Centro de partidos">
+        <aside class="match-panel match-panel-live-rail"><div class="panel-title"><h2>En seguimiento</h2><button id="refresh" type="button">Actualizar</button></div><div id="match-list" class="match-list" aria-live="polite"></div></aside>
+        <div class="detail-column">
         <section id="match-detail" class="match-detail" aria-live="polite" aria-busy="true"><div class="empty-reading"><span>↗</span><h2>Elige un partido</h2><p>Las lecturas publicadas aparecerán aquí con su contexto y sus límites.</p></div></section>
-      </section>
-      <section class="analytics" aria-labelledby="analytics-heading" hidden>
+      <section class="analytics live-stat-contrast" aria-labelledby="analytics-heading" hidden>
         <div class="analytics-heading-row">
           <div class="analytics-title"><h2 id="analytics-heading">Análisis en vivo</h2></div>
           <div id="refresh-countdown" class="refresh-countdown" role="status" aria-live="off">
@@ -95,6 +95,8 @@
           <footer id="analytics-evidence" class="analytics-evidence" aria-label="Evidencia y calidad de la lectura" hidden>
             <p>Cobertura, calidad, modelo y hora de observación: dato no disponible.</p>
           </footer>
+        </div>
+      </section>
         </div>
       </section>
       <p class="disclaimer">Las probabilidades expresan incertidumbre y no son una garantía ni una recomendación de apuesta.</p>

@@ -178,3 +178,36 @@
 .probabilities-title{text-align:center}
 .probabilities-layout{grid-template-columns:minmax(0,1fr);justify-items:center}
 .probabilities-layout>.surface{width:min(100%,48rem)}
+
+/* Live workspace: the match rail stays on the left while every reading opens on the right. */
+.workspace-live-layout{align-items:start;display:grid;gap:1.5rem;grid-template-columns:minmax(18rem,22rem) minmax(0,1fr)}
+.detail-column{min-width:0}
+.match-panel-live-rail{max-height:calc(100vh - 2rem);overflow:hidden;position:sticky;top:1rem}
+.match-panel-live-rail .match-list{display:grid;gap:.65rem;grid-template-columns:1fr;max-height:calc(100vh - 8.5rem);overflow-y:auto;overscroll-behavior:contain;padding-right:.25rem;scrollbar-color:var(--lime) transparent;scrollbar-width:thin}
+.workspace-live-layout .match-detail{min-height:32rem}
+.detail-opening{animation:detail-opening .55s cubic-bezier(.2,.8,.2,1) both}
+.detail-column>.analytics:not([hidden]){animation:detail-analytics-opening .6s cubic-bezier(.2,.8,.2,1) .08s both}
+@keyframes detail-opening{from{opacity:.25;transform:translateX(1.25rem) scale(.985)}to{opacity:1;transform:none}}
+@keyframes detail-analytics-opening{from{opacity:.35;transform:translateY(1rem)}to{opacity:1;transform:none}}
+@media(max-width:64rem){.workspace-live-layout{grid-template-columns:minmax(16rem,18rem) minmax(0,1fr)}}
+@media(max-width:48rem){.workspace-live-layout{grid-template-columns:1fr}.match-panel-live-rail{max-height:none;position:static}.match-panel-live-rail .match-list{max-height:18rem}.workspace-live-layout .match-detail{min-height:24rem}}
+@media(prefers-reduced-motion:reduce){.detail-opening,.detail-column>.analytics:not([hidden]){animation:none}}
+
+/* Live-stat contrast: color communicates side, while labels and bars preserve the meaning without color alone. */
+.live-stat-contrast{--stats-home:#d9ff62;--stats-away:#70e8ff;--stats-neutral:#fff2a6}
+.live-stat-contrast .surface,.live-stat-contrast .stat-comparison>div{background:rgb(3 14 10 / .72);border:1px solid rgb(255 255 255 / .2)}
+.live-stat-contrast .surface{box-shadow:inset 0 1px 0 rgb(255 255 255 / .04)}
+.live-stat-contrast .stat-comparison>div{border-left:3px solid var(--stats-home);padding:.85rem 1rem}
+.live-stat-contrast .stat-comparison>div:nth-child(even){border-left-color:var(--stats-away)}
+.live-stat-contrast .stat-comparison dt,.live-stat-contrast .probability>span:first-child{color:#f5fff1;font-weight:850}
+.live-stat-contrast .stat-value{font-weight:800}
+.live-stat-contrast .stat-value.home{color:var(--stats-home)}
+.live-stat-contrast .stat-value.away{color:var(--stats-away)}
+.live-stat-contrast .stat-comparison .stat-bar{box-shadow:0 0 .65rem rgb(217 255 98 / .24);height:.55rem}
+.live-stat-contrast .stat-comparison .stat-bar.home{background:var(--stats-home)}
+.live-stat-contrast .stat-comparison .stat-bar.away{background:var(--stats-away);box-shadow:0 0 .65rem rgb(112 232 255 / .24)}
+.live-stat-contrast .probability{background:rgb(3 14 10 / .72);border-left:3px solid var(--stats-neutral);padding:.65rem .8rem}
+.live-stat-contrast .probability>strong{color:#fff;font-size:1.04rem}
+.live-stat-contrast .probability i{background:rgb(255 255 255 / .25);height:.55rem}
+.live-stat-contrast .probability i::after{background:linear-gradient(90deg,var(--stats-neutral),var(--stats-home));box-shadow:0 0 .7rem rgb(217 255 98 / .25)}
+.live-stat-contrast .score-matrix-cell{border-color:rgb(255 255 255 / .24)}
